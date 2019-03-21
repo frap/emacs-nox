@@ -1,0 +1,3313 @@
+#+TITLE: Gases Emacs configuration
+#+AUTHOR: Andrés Gasson (Gas)
+#+BEGIN_SRC emacs-lisp
+;; -*- lexical-binding: t -*-
+#+END_SRC
+* Configuration
+:PROPERTIES:
+:VISIBILITY: children
+:END:
+** About
+This is Andrés Gasson's Emacs configuration, based on =doom-emacs= and
+Gonçalo Santos’s Emacs configuration.
+
+#+BEGIN_SRC emacs-lisp
+(setq-default user-full-name "Andrés Gasson")
+#+END_SRC
+
+*** Naming conventions
+- gas-...   variables or non-interactive functions
+- gas/...   an interactive function
+- gas|...   hook function
+- gas*...   advising functions
+- gas@...   a hydra command
+- ...!      a macro or function that configures Emacs
+- %...      functions used for in-snippet logic
+- +...      variables or functions related to a package
+
+** Essential
+*** Built-in packages
+#+BEGIN_SRC emacs-lisp
+(require 'subr-x)
+(require 'cl-lib)
+#+END_SRC
+
+*** Variables and constants
+#+BEGIN_SRC emacs-lisp
+(defvar gas-debug-mode (when (or (getenv "DEBUG") init-file-debug) t)
+  "If non-nil, all functions will be verbose. Set DEBUG=1 in the command
+line or use --debug-init to enable this.")
+
+(defconst EMACS26+ (eval-when-compile (not (version< emacs-version "26"))))
+(defconst EMACS27+ (eval-when-compile (not (version< emacs-version "27"))))
+
+(defconst IS-MAC     (eq system-type 'darwin))
+(defconst IS-LINUX   (eq system-type 'gnu/linux))
+(defconst IS-WINDOWS (memq system-type '(cygwin windows-nt ms-dos)))
+#+END_SRC
+
+*** Directories
+#+BEGIN_SRC emacs-lisp
+(defconst gas-emacs-dir (eval-when-compile (file-truename user-emacs-directory))
+  "The path to the emacs.d directory. Must end in a slash.")
+
+(defconst gas-local-dir (concat gas-emacs-dir ".local/")
+  "Root directory for local Emacs files. Use this as permanent storage for files
+that are safe to share across systems (if this config is symlinked across
+several computers).")
+
+(defconst gas-etc-dir (concat gas-local-dir "etc/")
+  "Directory for non-volatile storage.
+Use this for files that don't change much, like servers binaries, external
+dependencies or long-term shared data.")
+
+(defconst gas-cache-dir (concat gas-local-dir "cache/")
+  "Directory for volatile storage.
+Use this for files that change often, like cache files.")
+
+(defconst gas-packages-dir (concat gas-local-dir "packages/")
+  "Where packages are stored.")
+#+END_SRC
+
+Also create the directories if they don't exist.
+
+#+BEGIN_SRC emacs-lisp
+(dolist (dir (list gas-local-dir gas-etc-dir gas-cache-dir gas-packages-dir))
+  (unless (file-directory-p dir) (make-directory dir t)))
+#+END_SRC
+
+*** Functions and macros
+**** From DOOM Emacs
+gsetq is from general.el
+#+BEGIN_SRC emacs-lisp
+(defmacro gen-setq (&rest settings)
+  "A stripped-down `customize-set-variable' with the syntax of `setq'.
+Like `setq', multiple variables can be set at once; SETTINGS should consist of
+variable value pairs. Some variables have a custom setter (specified with
+`defcustom' and :set) that is used to run code necessary for changes to take
+effect (e.g. `auto-revert-interval'). If a package has already been loaded, and
+the user uses `setq' to set one of these variables, the :set code will not
+run (e.g. in the case of `auto-revert-interval', the timer will not be updated).
+Like with `customize-set-variable', `general-setq' will use the custom :set
+setter when it exists. If the package defining the variable has not yet been
+loaded, the custom setter will not be known, but it will still be run upon
+loading the package. Unlike `customize-set-variable', `general-setq' does not
+attempt to load any dependencies for the variable and does not support giving
+variables comments. It also falls back to `set' instead of `set-default', so
+that like `setq' it will change the local value of a buffer-local variable
+instead of the default value."
+  `(progn
+     ,@(cl-loop for (var val) on settings by 'cddr
+                collect `(funcall (or (get ',var 'custom-set) #'set)
+                                  ',var ,val))))
+
+(defun gas-try-run-hook (hook)
+  "Run HOOK (a hook function), but marks thrown errors to make it a little
+easier to tell where they came from.
+
+Meant to be used with `run-hook-wrapped'."
+  (when gas-debug-mode
+    (message "Running gas hook: %s" hook))
+  (condition-case e
+      (funcall hook)
+    ((debug error)
+     (signal 'gas-hook-error (list hook e))))
+  ;; return nil so `run-hook-wrapped' won't short circuit
+  nil)
+
+(defun gas-unquote (exp)
+  "Return EXP unquoted."
+  (declare (pure t) (side-effect-free t))
+  (while (memq (car-safe exp) '(quote function))
+    (setq exp (cadr exp)))
+  exp)
+
+(defun gas-enlist (exp)
+  "Return EXP wrapped in a list, or as-is if already a list."
+  (declare (pure t) (side-effect-free t))
+  (if (listp exp) exp (list exp)))
+
+(defun gas-keyword-intern (str)
+  "Converts STR (a string) into a keyword (`keywordp')."
+  (declare (pure t) (side-effect-free t))
+  (cl-check-type str string)
+  (intern (concat ":" str)))
+
+(defun gas-keyword-name (keyword)
+  "Returns the string name of KEYWORD (`keywordp') minus the leading colon."
+  (declare (pure t) (side-effect-free t))
+  (cl-check-type :test keyword)
+  (substring (symbol-name keyword) 1))
+
+(defun gas-resolve-hook-forms (hooks)
+  (declare (pure t) (side-effect-free t))
+  (cl-loop with quoted-p = (eq (car-safe hooks) 'quote)
+           for hook in (gas-enlist (gas-unquote hooks))
+           if (eq (car-safe hook) 'quote)
+           collect (cadr hook)
+           else if quoted-p
+           collect hook
+           else collect (intern (format "%s-hook" (symbol-name hook)))))
+
+(defmacro λ! (&rest body)
+  "A shortcut for inline interactive lambdas."
+  (declare (doc-string 1))
+  `(lambda () (interactive) ,@body))
+
+(defalias 'lambda! 'λ!)
+
+(defmacro add-transient-hook! (hook &rest args)
+  "Attaches transient forms to a HOOK.
+
+This means FORMS will be evaluated once when that function/hook is first
+invoked, then never again.
+
+HOOK can be a quoted hook or a sharp-quoted function (which will be advised).
+
+ARGS can be a function, list of functions, or body forms to be wrapped in a lambda.
+When it is a function or a list of functions, they will be called with the hooks args."
+  (declare (indent 1))
+  (let ((append (if (eq (car args) :after) (pop args)))
+        (funcs
+         (let ((val (car args)))
+           (if (memq (car-safe val) '(quote function))
+               (if (cdr-safe (cadr val))
+                   (cadr val)
+                 (list (cadr val)))
+             (list args))))
+        (func-name (gensym "gas|transient-hook-")))
+    `(progn
+       (fset ',func-name
+             (lambda (&rest call-args)
+               ,@(cl-loop for fn in funcs
+                          collect (if (symbolp fn)
+                                      `(apply #',fn call-args)
+                                    `(progn ,@args)))
+               (cond ((functionp ,hook) (advice-remove ,hook #',func-name))
+                     ((symbolp ,hook)   (remove-hook ,hook #',func-name)))
+               (unintern ',func-name nil)))
+       (cond ((functionp ,hook)
+              (advice-add ,hook ,(if append :after :before) #',func-name))
+             ((symbolp ,hook)
+              (put ',func-name 'permanent-local-hook t)
+              (add-hook ,hook #',func-name ,append))))))
+
+(defmacro after! (targets &rest body)
+  "A smart wrapper around `with-eval-after-load'. Supresses warnings during
+compilation. This will no-op on features that have been disabled by the user."
+  (declare (indent defun) (debug t))
+  (unless (and (symbolp targets)
+               (memq targets (bound-and-true-p gas-disabled-packages)))
+    (list (if (or (not (bound-and-true-p byte-compile-current-file))
+                  (eq (car-safe targets) :when)
+                  (dolist (next (gas-enlist targets))
+                    (unless (keywordp next)
+                      (if (symbolp next)
+                          (require next nil :no-error)
+                        (load next :no-message :no-error)))))
+              #'progn
+            #'with-no-warnings)
+          (cond ((eq (car-safe targets) :when)
+                 `(if ,(cadr targets)
+                      (progn ,@body)
+                    ,(let ((fun (gensym "gas|delay-form-")))
+                       `(progn
+                          (fset ',fun (lambda (&rest args)
+                                        (when ,(or (car (cdr-safe targets)) t)
+                                          (remove-hook 'after-load-functions #',fun)
+                                          (unintern ',fun nil)
+                                          (ignore args)
+                                          ,@body)))
+                          (put ',fun 'permanent-local-hook t)
+                          (add-hook 'after-load-functions #',fun)))))
+                ((symbolp targets)
+                 `(with-eval-after-load ',targets
+                    ,@body))
+                ((and (consp targets)
+                      (memq (car targets) '(:or :any)))
+                 `(progn
+                    ,@(cl-loop for next in (cdr targets)
+                               collect `(after! ,next ,@body))))
+                ((and (consp targets)
+                      (memq (car targets) '(:and :all)))
+                 (dolist (next (cdr targets))
+                   (setq body `((after! ,next ,@body))))
+                 (car body))
+                ((listp targets)
+                 `(after! (:all ,@targets) ,@body))))))
+
+(defmacro quiet! (&rest forms)
+  "Run FORMS without making any output."
+  `(if gas-debug-mode
+       (progn ,@forms)
+     (let ((old-fn (symbol-function 'write-region)))
+       (cl-letf* ((standard-output (lambda (&rest _)))
+                  ((symbol-function 'load-file) (lambda (file) (load file nil t)))
+                  ((symbol-function 'message) (lambda (&rest _)))
+                  ((symbol-function 'write-region)
+                   (lambda (start end filename &optional append visit lockname mustbenew)
+                     (unless visit (setq visit 'no-message))
+                     (funcall old-fn start end filename append visit lockname mustbenew)))
+                  (inhibit-message t)
+                  (save-silently t))
+         ,@forms))))
+
+(defmacro add-hook! (&rest args)
+  "A convenience macro for `add-hook'. Takes, in order:
+
+  1. Optional properties :local and/or :append, which will make the hook
+     buffer-local or append to the list of hooks (respectively),
+  2. The hooks: either an unquoted major mode, an unquoted list of major-modes,
+     a quoted hook variable or a quoted list of hook variables. If unquoted, the
+     hooks will be resolved by appending -hook to each symbol.
+  3. A function, list of functions, or body forms to be wrapped in a lambda.
+
+Examples:
+    (add-hook! 'some-mode-hook 'enable-something)   (same as `add-hook')
+    (add-hook! some-mode '(enable-something and-another))
+    (add-hook! '(one-mode-hook second-mode-hook) 'enable-something)
+    (add-hook! (one-mode second-mode) 'enable-something)
+    (add-hook! :append (one-mode second-mode) 'enable-something)
+    (add-hook! :local (one-mode second-mode) 'enable-something)
+    (add-hook! (one-mode second-mode) (setq v 5) (setq a 2))
+    (add-hook! :append :local (one-mode second-mode) (setq v 5) (setq a 2))
+
+Body forms can access the hook's arguments through the let-bound variable
+`args'."
+  (declare (indent defun) (debug t))
+  (let ((hook-fn 'add-hook)
+        append-p local-p)
+    (while (keywordp (car args))
+      (pcase (pop args)
+        (:append (setq append-p t))
+        (:local  (setq local-p t))
+        (:remove (setq hook-fn 'remove-hook))))
+    (let ((hooks (gas-resolve-hook-forms (pop args)))
+          (funcs
+           (let ((val (car args)))
+             (if (memq (car-safe val) '(quote function))
+                 (if (cdr-safe (cadr val))
+                     (cadr val)
+                   (list (cadr val)))
+               (list args))))
+          forms)
+      (dolist (fn funcs)
+        (setq fn (if (symbolp fn)
+                     `(function ,fn)
+                   `(lambda (&rest _) ,@args)))
+        (dolist (hook hooks)
+          (push (if (eq hook-fn 'remove-hook)
+                    `(remove-hook ',hook ,fn ,local-p)
+                  `(add-hook ',hook ,fn ,append-p ,local-p))
+                forms)))
+      `(progn ,@(if append-p (nreverse forms) forms)))))
+
+(defmacro remove-hook! (&rest args)
+  "Convenience macro for `remove-hook'. Takes the same arguments as
+`add-hook!'."
+  (declare (indent defun) (debug t))
+  `(add-hook! :remove ,@args))
+
+(defmacro setq-hook! (hooks &rest rest)
+  "Convenience macro for setting buffer-local variables in a hook.
+
+  (setq-hook! 'markdown-mode-hook
+    line-spacing 2
+    fill-column 80)"
+  (declare (indent 1))
+  (unless (= 0 (% (length rest) 2))
+    (signal 'wrong-number-of-arguments (length rest)))
+  `(add-hook! ,hooks
+     ,@(let (forms)
+         (while rest
+           (let ((var (pop rest))
+                 (val (pop rest)))
+             (push `(setq-local ,var ,val) forms)))
+         (nreverse forms))))
+
+(defun gas*shut-up (orig-fn &rest args)
+  "Generic advisor for silencing noisy functions."
+  (quiet! (apply orig-fn args)))
+#+END_SRC
+
+**** File management
+#+BEGIN_SRC emacs-lisp
+(defun gas/rename-file-and-buffer ()
+  "Rename current buffer and the file it is visiting, if any."
+  (interactive)
+  (let ((filename (buffer-file-name)))
+    (if (not (and filename (file-exists-p filename)))
+        (rename-buffer (read-from-minibuffer "New name: " (buffer-name)))
+      (let ((new-name (read-file-name "New name: " filename)))
+        (if (vc-backend filename)
+            (vc-rename-file filename new-name)
+          (rename-file filename new-name t))
+        (set-visited-file-name new-name t t)))))
+
+(defun gas/delete-file-and-buffer ()
+  "Kill the current buffer and delete the file it is visiting, if any."
+  (interactive)
+  (let ((filename (buffer-file-name)))
+    (if (not (and filename (file-exists-p filename)))
+        (kill-buffer)
+      (if (vc-backend filename)
+          (vc-delete-file filename)
+        (when (y-or-n-p (format "Are you sure you want to delete %s? " filename))
+          (delete-file filename delete-by-moving-to-trash)
+          (message "Deleted file %s" filename)
+          (kill-buffer))))))
+#+END_SRC
+
+**** Line movement
+#+BEGIN_SRC emacs-lisp
+(defun gas/previous-blank-line ()
+  "Move point to the previous blank line"
+  (interactive)
+  (move-end-of-line nil)
+  (if (search-backward-regexp "^[\t ]*\n[\t ]*[^\t\n ]+" nil "NOERROR") nil
+    (goto-char (point-min))))
+
+(defun gas/next-blank-line ()
+  "Move point to the next blank line"
+  (interactive)
+  (move-beginning-of-line nil)
+  (if (not (search-forward-regexp "[^\t\n ]\n[\t ]*$" nil "NOERROR"))
+      (goto-char (point-max))))
+
+(defun gas/open-line-above ()
+  "Insert an empty line above the current line.
+Position the cursor at its beginning, according to the current mode."
+  (interactive)
+  (move-end-of-line 0)
+  (newline-and-indent))
+
+(defun gas/open-line-below ()
+  "Insert an empty line below the current line.
+Position the cursor at its beginning, according to the current mode."
+  (interactive)
+  (move-end-of-line nil)
+  (newline-and-indent))
+#+END_SRC
+
+**** Exiting
+#+BEGIN_SRC emacs-lisp
+(defun gas/exit-emacs (arg)
+  "Exit Emacs, possibly killing the daemon and/or saving buffer.
+When ARG is:
+- nil or negative, it will kill the current terminal
+- `universal-argument' or positive, it will kill the daemon
+- a number, it will save all buffers automatically"
+  (interactive "P")
+  (when (or (numberp arg) (eq arg '-))
+    (setq arg (prefix-numeric-value arg)))
+  (let* ((save-without-asking (numberp arg))
+         (kill-server (or (equal arg '(4))
+                          (and save-without-asking
+                               (>= arg 0)))))
+    (if kill-server
+        (save-buffers-kill-emacs save-without-asking)
+      (save-buffers-kill-terminal save-without-asking))))
+#+END_SRC
+
+**** Helpers
+#+BEGIN_SRC emacs-lisp
+(defun gas-pos-at-line (line &optional column)
+  (save-excursion
+    (goto-char (point-min))
+    (forward-line (- line 1))
+    (move-to-column (or column 0))
+    (point)))
+
+(defun gas-get-line-from-file (file line &optional trim)
+  (with-current-buffer (find-file-noselect file)
+    (save-excursion
+      (goto-char (point-min))
+      (forward-line (- line 1))
+      (let ((string (thing-at-point 'line)))
+        (if trim
+            (replace-regexp-in-string "\\(\\`[[:space:]\n]*\\|[[:space:]\n]*\\'\\)" "" string)
+          string)))))
+
+(defun gas-get-entire-buffer (buffer)
+  (with-current-buffer buffer
+    (save-restriction
+      (widen)
+      (buffer-substring-no-properties (point-min) (point-max)))))
+#+END_SRC
+
+**** Byte compilation
+#+BEGIN_SRC emacs-lisp
+(defun gas-byte-compile-init ()
+  (byte-compile-file (concat user-emacs-directory "config.el"))
+  (byte-compile-file (concat user-emacs-directory "init.el"))
+  (byte-compile-file (concat user-emacs-directory "early-init.el")))
+#+END_SRC
+
+*** Hooks
+#+BEGIN_SRC emacs-lisp
+(defvar gas-post-init-hook nil
+  "A list of hooks to run when Emacs is fully initialised. Fires at the end of
+`emacs-startup-hook', as late as possible. Guaranteed to run after everything
+else (except for `window-setup-hook').")
+
+(defun gas|post-init ()
+  "Run `gas-post-init-hook'."
+  (run-hook-wrapped 'gas-post-init-hook #'gas-try-run-hook))
+(add-hook! 'emacs-startup-hook #'gas|post-init)
+#+END_SRC
+
+**** Window and buffer switch
+#+BEGIN_SRC emacs-lisp
+(defvar gas-before-switch-window-hook nil
+  "Hook run before `switch-window' or `switch-frame' are called. See
+`gas-after-switch-window-hook'.")
+
+(defvar gas-after-switch-window-hook nil
+  "Hook run after `switch-window' or `switch-frame' are called. See
+`gas-before-switch-window-hook'.")
+
+(defvar gas-before-switch-buffer-hook nil
+  "Hook run before `switch-to-buffer', `pop-to-buffer' or `display-buffer' are
+called. The buffer to be switched to is current when these hooks run.")
+
+(defvar gas-after-switch-buffer-hook nil
+  "Hook run after `switch-to-buffer', `pop-to-buffer' or `display-buffer' are
+called. The buffer to be switched to is current when these hooks run.")
+
+(defvar gas-inhibit-switch-buffer-hooks nil)
+(defvar gas-inhibit-switch-window-hooks nil)
+
+(defun gas*switch-window-hooks (orig-fn window &optional norecord)
+  (if (or gas-inhibit-switch-window-hooks
+          (null window)
+          (eq window (selected-window))
+          (window-minibuffer-p)
+          (window-minibuffer-p window))
+      (funcall orig-fn window norecord)
+    (let ((gas-inhibit-switch-window-hooks t))
+      (run-hooks 'gas-before-switch-window-hook)
+      (prog1 (funcall orig-fn window norecord)
+        (with-selected-window window
+          (run-hooks 'gas-after-switch-window-hook))))))
+(defun gas*switch-buffer-hooks (orig-fn buffer-or-name &rest args)
+  (if (or gas-inhibit-switch-buffer-hooks
+          (eq (get-buffer buffer-or-name) (current-buffer)))
+      (apply orig-fn buffer-or-name args)
+    (let ((gas-inhibit-switch-buffer-hooks t))
+      (run-hooks 'gas-before-switch-buffer-hook)
+      (prog1 (apply orig-fn buffer-or-name args)
+        (with-current-buffer buffer-or-name
+          (run-hooks 'gas-after-switch-buffer-hook))))))
+
+(defun gas|setup-switch-hooks (&optional disable)
+  (dolist (spec '((select-window . gas*switch-window-hooks)
+                  (switch-to-buffer . gas*switch-buffer-hooks)
+                  (display-buffer . gas*switch-buffer-hooks)
+                  (pop-to-buffer . gas*switch-buffer-hooks)))
+    (if disable
+        (advice-remove (car spec) (cdr spec))
+      (advice-add (car spec) :around (cdr spec)))))
+(add-hook 'gas-post-init-hook #'gas|setup-switch-hooks)
+#+END_SRC
+
+*** Emacs 25 compatibility
+#+BEGIN_SRC emacs-lisp
+(eval-and-compile
+  (unless EMACS26+
+    (with-no-warnings
+      (defalias 'if-let* #'if-let)
+      (defalias 'when-let* #'when-let)
+
+      ;; `alist-get' doesn't have its 5th argument before Emacs 26
+      (defun gas*alist-get (key alist &optional default remove testfn)
+        (ignore remove)
+        (let ((x (if (not testfn)
+                     (assq key alist)
+                   (assoc key alist testfn))))
+          (if x (cdr x) default)))
+      (advice-add #'alist-get :override #'gas*alist-get))))
+#+END_SRC
+
+*** Package ecosystem
+#+BEGIN_SRC emacs-lisp
+(require 'package)
+(setq-default package-user-dir      gas-packages-dir
+              package-gnupghome-dir gas-packages-dir
+              package-archives
+              '(("gnu"   . "https://elpa.gnu.org/packages/")
+		      ("melpa-stable" . "http://stable.melpa.org/packages/")
+               ;; ("melpa" . "https://melpa.org/packages/")
+                ("org"   . "https://orgmode.org/elpa/")))
+
+(unless (bound-and-true-p gnutls-verify-error)
+  (dolist (archive package-archives)
+    (setcdr archive (replace-regexp-in-string "^https://" "http://" (cdr archive) t nil))))
+
+(package-initialize)
+#+END_SRC
+
+**** Setup use-package
+#+BEGIN_SRC emacs-lisp
+(unless (package-installed-p 'use-package)
+  (package-refresh-contents)
+  (package-install 'use-package))
+
+;; Enable use-package
+;;(eval-when-compile
+;;  (require 'use-package)
+;;  (require 'delight)                    ;; if you use :delight
+ ;; (require 'bind-key))                  ;; if you use any :bind variant
+
+(require 'use-package)
+(setq-default use-package-always-defer t
+              use-package-verbose gas-debug-mode
+              use-package-compute-statistics gas-debug-mode
+              use-package-minimum-reported-time (if gas-debug-mode 0 0.1)
+              use-package-expand-minimally noninteractive)
+#+END_SRC
+
+Add the :after-call keyword, that takes a symbol or list of symbols, where the symbols are
+functions or hook variables. It will load the package on the first call to any of those
+symbols.
+
+#+BEGIN_SRC emacs-lisp
+(defvar gas-deferred-packages-alist '(t))
+(after! use-package-core
+  (add-to-list 'use-package-deferring-keywords :after-call nil #'eq)
+  (setq use-package-keywords
+        (use-package-list-insert :after-call use-package-keywords :after))
+
+  (defalias 'use-package-normalize/:after-call 'use-package-normalize-symlist)
+  (defun use-package-handler/:after-call (name _keyword hooks rest state)
+    (if (plist-get state :demand)
+        (use-package-process-keywords name rest state)
+      (let ((fn (intern (format "gas|transient-hook--load-%s" name))))
+        (use-package-concat
+         `((fset ',fn
+                 (lambda (&rest _)
+                   (when gas-debug-mode
+                     (message "Loading deferred package %s from %s" ',name ',fn))
+                   (condition-case e (require ',name)
+                     ((debug error)
+                      (message "Failed to load deferred package %s: %s" ',name e)))
+                   (dolist (hook (cdr (assq ',name gas-deferred-packages-alist)))
+                     (if (functionp hook)
+                         (advice-remove hook #',fn)
+                       (remove-hook hook #',fn)))
+                   (delq (assq ',name gas-deferred-packages-alist)
+                         gas-deferred-packages-alist)
+                   (fmakunbound ',fn))))
+         (let (forms)
+           (dolist (hook hooks forms)
+             (push (if (functionp hook)
+                       `(advice-add #',hook :before #',fn)
+                     `(add-hook ',hook #',fn))
+                   forms)))
+         `((unless (assq ',name gas-deferred-packages-alist)
+             (push '(,name) gas-deferred-packages-alist))
+           (nconc (assq ',name gas-deferred-packages-alist)
+                  '(,@hooks)))
+         (use-package-process-keywords name rest state))))))
+#+END_SRC
+
+**** Setup Quelpa
+#+BEGIN_SRC emacs-lisp
+(use-package quelpa :ensure
+  :init
+  (setq-default quelpa-dir (concat gas-packages-dir "quelpa-cache/")
+                quelpa-verbose gas-debug-mode
+		        quelpa-melpa-recipe-stores nil
+		        quelpa-checkout-melpa-p nil
+		        quelpa-update-melpa-p nil
+		        quelpa-self-upgrade-p nil))
+
+(use-package quelpa-use-package :ensure)
+
+(require 'quelpa)
+(require 'quelpa-use-package)
+#+END_SRC
+
+*** Base packages
+**** Hydra
+#+BEGIN_SRC emacs-lisp
+(use-package hydra :ensure
+  :custom (lv-use-separator t))
+#+END_SRC
+
+**** General
+#+BEGIN_SRC emacs-lisp
+(use-package general :ensure
+  :demand
+  :config
+  (defalias 'gsetq 'general-setq)
+  (general-create-definer gas-leader :prefix "C-c")
+  (general-create-definer gas-local-leader :prefix "C-c m")
+)
+#+END_SRC
+
+** General Settings and tweaks
+#+BEGIN_SRC emacs-lisp
+(gsetq
+ ad-redefinition-action 'accept
+ auto-window-vscroll nil ;; https://emacs.stackexchange.com/a/28746
+ autoload-compute-prefixes nil
+ bidi-display-reordering nil
+ byte-compile-verbose gas-debug-mode
+ debug-on-error gas-debug-mode
+ ffap-machine-p-known 'reject
+ idle-update-delay 2
+ inhibit-compacting-font-caches t
+ minibuffer-prompt-properties '(read-only t point-entered minibuffer-avoid-prompt face minibuffer-prompt))
+#+END_SRC
+
+**** UTF-8 as default
+#+BEGIN_SRC emacs-lisp
+(when (fboundp 'set-charset-priority)
+  (set-charset-priority 'unicode))
+(set-language-environment "UTF-8")
+(prefer-coding-system        'utf-8-unix)
+(set-selection-coding-system 'utf-8-unix)
+(set-default-coding-systems  'utf-8-unix)
+#+END_SRC
+
+**** Quiet startup
+#+BEGIN_SRC emacs-lisp
+(gsetq inhibit-startup-message t
+       inhibit-startup-echo-area-message user-login-name
+       inhibit-default-init t
+       initial-major-mode 'fundamental-mode
+       initial-scratch-message nil)
+(fset #'display-startup-echo-area-message #'ignore)
+
+(defun gas*server-execute-quiet (orig-fn &rest args)
+  "Shup ut `server-execute' once."
+  (quiet! (apply orig-fn args))
+  (advice-remove 'server-execute 'gas*server-execute-quiet))
+(when (daemonp)
+  (advice-add 'server-execute :around 'gas*server-execute-quiet))
+#+END_SRC
+
+**** Files
+#+BEGIN_SRC emacs-lisp
+(gsetq abbrev-file-name               (concat gas-local-dir "abbrev.el")
+       auto-save-file-name-transforms (list (list ".*" (concat gas-cache-dir "auto-save/") t))
+       auto-save-list-file-prefix     (concat gas-cache-dir "auto-save/.saves-")
+       auto-save-list-file-name       (concat gas-cache-dir "auto-save-list")
+       backup-directory-alist         (list (cons "." (concat gas-cache-dir "backup/")))
+       custom-file                    (concat gas-local-dir "custom.el")
+       mc/list-file                   (concat gas-etc-dir "mc-lists.el")
+       pcache-directory               (concat gas-cache-dir "pcache/")
+       request-storage-directory      (concat gas-cache-dir "request")
+       server-auth-dir                (concat gas-cache-dir "server/")
+       shared-game-score-directory    (concat gas-etc-dir "shared-game-score/")
+       url-cache-directory            (concat gas-cache-dir "url/")
+       url-configuration-directory    (concat gas-etc-dir "url/"))
+
+(make-directory (cadar auto-save-file-name-transforms) t)
+#+END_SRC
+
+**** History and backup
+#+BEGIN_SRC emacs-lisp
+(gsetq delete-by-moving-to-trash t
+       delete-old-versions t
+       history-length 500
+       kept-new-versions 10
+       kept-old-versions 2
+       version-control t)
+#+END_SRC
+
+**** Security
+#+BEGIN_SRC emacs-lisp
+(gsetq gnutls-verify-error (not (getenv "INSECURE"))
+       tls-checktrust gnutls-verify-error
+       tls-program (list "gnutls-cli --x509cafile %t -p %p %h"
+                         "gnutls-cli -p %p %h"
+                         "openssl s_client -connect %h:%p -no_ssl2 -no_ssl3 -ign_eof"))
+#+END_SRC
+
+**** Set indirect buffer name
+#+BEGIN_SRC emacs-lisp
+(defun gas*set-indirect-buffer-filename (orig-fn base-buffer name &optional clone)
+  "In indirect buffers, `buffer-file-name' is nil, which can cause problems
+with functions that require it."
+  (let ((file-name (buffer-file-name base-buffer))
+        (buffer (funcall orig-fn base-buffer name clone)))
+    (when (and file-name buffer)
+      (with-current-buffer buffer
+        (unless buffer-file-name
+          (setq buffer-file-name file-name
+                buffer-file-truename (file-truename file-name)))))
+    buffer))
+(advice-add #'make-indirect-buffer :around #'gas*set-indirect-buffer-filename)
+#+END_SRC
+
+** OS specific
+#+BEGIN_SRC emacs-lisp
+(gsetq x-select-request-type '(UTF8_STRING COMPOUND_TEXT TEXT STRING)
+       select-enable-clipboard t
+       select-enable-primary t)
+
+(defmacro set-env! (&rest _vars)
+  "Inject VARS from your shell environment into Emacs.")
+
+(cond (IS-MAC
+       (setq mac-command-modifier 'meta
+             mac-option-modifier  'alt
+             ;; sane trackpad/mouse scroll settings
+             mac-redisplay-dont-reset-vscroll t
+             mac-mouse-wheel-smooth-scroll nil
+             mouse-wheel-scroll-amount '(5 ((shift) . 2))  ; one line at a time
+             mouse-wheel-progressive-speed nil             ; don't accelerate scrolling
+             ;; Curse Lion and its sudden but inevitable fullscreen mode!
+             ;; NOTE Meaningless to railwaycat's emacs-mac build
+             ns-use-native-fullscreen nil
+             ;; Visit files opened outside of Emacs in existing frame, rather
+             ;; than a new one
+             ns-pop-up-frames nil)
+
+       ;; Fix the clipboard in terminal or daemon Emacs (non-GUI)
+       (when (or (daemonp) (not (display-graphic-p)))
+         (add-hook 'gas-post-init-hook #'osx-clipboard-mode))
+
+       (when (or (daemonp) (display-graphic-p))
+         ;; Syncs ns frame parameters with theme (and fixes mismatching text
+         ;; colr in the frame title)
+         (when (require 'ns-auto-titlebar nil t)
+           (add-hook 'doom-load-theme-hook #'ns-auto-titlebar-mode))
+
+         ;; A known problem with GUI Emacs on MacOS (or daemons started via
+         ;; launchctl or brew services): it runs in an isolated
+         ;; environment, so envvars will be wrong. That includes the PATH
+         ;; Emacs picks up. `exec-path-from-shell' fixes this.
+         (when (require 'exec-path-from-shell nil t)
+           (defun set-env! (&rest vars)
+             "Inject VARS from your shell environment into Emacs."
+             (exec-path-from-shell-copy-envs vars))
+           (setq exec-path-from-shell-check-startup-files nil
+                 exec-path-from-shell-arguments (delete "-i" exec-path-from-shell-arguments)
+                 exec-path-from-shell-debug gas-debug-mode
+                 exec-path-from-shell-variables
+                 (nconc exec-path-from-shell-variables '("LC_CTYPE" "LC_ALL" "LANG")))
+           (exec-path-from-shell-initialize))))
+
+      (IS-LINUX
+       (setq x-gtk-use-system-tooltips nil    ; native tooltips are ugly!
+             x-underline-at-descent-line t))  ; draw underline lower
+
+      (IS-WINDOWS
+       (setq w32-get-true-file-attributes nil) ; fix file io slowdowns
+       (when (display-graphic-p)
+         (setenv "GIT_ASKPASS" "git-gui--askpass"))))
+
+#+END_SRC
+
+** UI
+*** Settings
+#+BEGIN_SRC emacs-lisp
+(gsetq initial-frame-alist '((fullscreen . fullboth)
+                             (fullscreen-restore . maximized))
+       ring-bell-function #'ignore
+       visible-bell nil
+       custom-safe-themes t
+       frame-inhibit-implied-resXize t
+       cursor-in-non-selected-windows nil
+       highlight-nonselected-windows nil
+       mode-line-default-help-echo nil
+       use-dialog-box nil
+       visible-cursor nil
+       x-stretch-cursor nil
+       pos-tip-internal-border-width 6
+       pos-tip-border-width 1
+       window-resize-pixelwise t
+       frame-resize-pixelwise t
+       echo-keystrokes 0.2
+       window-divider-default-places t
+       window-divider-default-bottom-width 1
+       window-divider-default-right-width 1
+       frame-title-format '("%b - Gas Emacs"))
+
+(fset 'yes-or-no-p 'y-or-n-p)
+(minibuffer-depth-indicate-mode)
+#+END_SRC
+
+**** Don't blink cursor
+#+BEGIN_SRC emacs-lisp
+(blink-cursor-mode -1)
+#+END_SRC
+
+**** Windows dividers
+#+BEGIN_SRC emacs-lisp
+(window-divider-mode)
+#+END_SRC
+
+**** Better (?) JIT font locking
+#+BEGIN_SRC emacs-lisp
+(gsetq jit-lock-defer-time nil
+       jit-lock-stealth-nice 0.1
+       jit-lock-stealth-time 0.2
+       jit-lock-stealth-verbose nil)
+#+END_SRC
+
+**** Highlight line
+#+BEGIN_SRC emacs-lisp
+(use-package hl-line
+  :ghook ('gas-post-init-hook #'global-hl-line-mode)
+  :config
+  (gsetq hl-line-sticky-flag nil
+         global-hl-line-sticky-flag nil))
+#+END_SRC
+
+**** Highlight matching parentheses
+#+BEGIN_SRC emacs-lisp
+(use-package paren
+  :after-call (after-find-file gas-before-switch-buffer-hook)
+  :config
+  (setq show-paren-delay 0
+        show-paren-highlight-openparen t
+        show-paren-when-point-inside-paren t)
+  (show-paren-mode))
+#+END_SRC
+
+**** Shims
+#+BEGIN_SRC emacs-lisp
+(unless (fboundp 'define-fringe-bitmap) (defun define-fringe-bitmap (&rest _)))
+#+END_SRC
+
+**** Misc
+#+BEGIN_SRC emacs-lisp
+(use-package speedbar
+  :config
+  (gsetq speedbar-frame-parameters '((minibuffer . t)
+                                     (unsplittable . t)
+                                     (width . 30)
+                                     (border-width . 0)
+                                     (left-fringe . 0))))
+
+(use-package server
+  :config
+  (add-hook 'after-make-frame-functions (lambda (frame) (select-frame-set-input-focus frame)) t)
+
+  ;; Remove prompt if the file is opened in other clients
+  (defun server-remove-kill-buffer-hook ()
+    (remove-hook 'kill-buffer-query-functions #'server-kill-buffer-query-function))
+  (add-hook 'server-visit-hook #'server-remove-kill-buffer-hook))
+#+END_SRC
+
+*** Font
+#+BEGIN_SRC emacs-lisp
+(defvar gas-fonts '(("PragmataPro" . 12) ("Hack" . 11) ("DejaVu Sans Mono" . 11)
+                    ("Inconsolata" . 13) ("Source Code Pro" . 11))
+  "List of fonts and sizes. The first one available will be used.")
+
+(defvar gas-font-faces-changed nil
+  "List ARGS passed to custom-set-faces, in order to fix font.")
+
+(defun gas-font-set-faces (&rest args)
+  "Override faces' attributes in the `user' theme.
+These settings will remain until a new font is loaded.
+ARGS are the same as in `custom-set-faces'."
+  (push args gas-font-faces-changed)
+  (apply 'custom-set-faces args))
+
+(defun gas/change-font ()
+  (interactive)
+  (let* (available-fonts font-name font-size font-setting)
+    (dolist (font gas-fonts)
+      (when (member (car font) (font-family-list))
+        (push font available-fonts)))
+
+    (push (cons "Monospace" 11) available-fonts)
+    (setq available-fonts (nreverse available-fonts))
+
+    (when gas-debug-mode (message "Available fonts: %s" available-fonts))
+
+    (if (called-interactively-p 'interactive)
+        (let* ((chosen (assoc-string (completing-read "What font to use? " available-fonts nil t)
+                                     available-fonts)))
+          (setq font-name (car chosen)
+                font-size (read-number "Font size: " (cdr chosen))))
+      (setq font-name (caar available-fonts)
+            font-size (cdar available-fonts)))
+
+    (setq font-setting (format "%s-%d" font-name font-size))
+    (set-frame-font font-setting nil t)
+    (add-to-list 'default-frame-alist (cons 'font font-setting))
+
+    (dolist (args gas-font-faces-changed)
+      (apply 'custom-theme-reset-faces 'user args))
+    (setq gas-font-faces-changed nil)
+
+    (cond ((string= font-name "PragmataPro")
+           (gas-font-set-faces `(org-table ((t (:family ,(format "PragmataPro Mono-%d" font-size))))))))))
+#+END_SRC
+
+*** Theme
+**** Theme customizer
+#+BEGIN_SRC emacs-lisp
+(defvar gas-customize-theme-hook nil
+  "Hook for theme customization, called with the theme name.")
+
+(defvar gas-theme-faces-changed nil
+  "List ARGS passed to custom-set-faces, in order to fix theme.")
+
+(defun gas*customize-theme (theme)
+  (unless (eq theme 'user)
+    (dolist (enabled-theme custom-enabled-themes)
+      (unless (eq enabled-theme theme) (disable-theme enabled-theme))))
+
+  (dolist (args gas-theme-faces-changed)
+    (apply 'custom-theme-reset-faces 'user args))
+  (setq gas-theme-faces-changed nil)
+
+  (run-hook-with-args-until-success 'gas-customize-theme-hook (or theme
+                                                                  (car custom-enabled-themes))))
+(advice-add 'enable-theme :after #'gas*customize-theme)
+
+(defmacro gas-add-customize-theme-hook (target-theme &rest body)
+  "TARGET-THEME may be a list, a symbol or a regexp."
+  (declare (indent defun))
+  `(add-hook 'gas-customize-theme-hook
+             (lambda (theme)
+               ,(cond ((symbolp (eval target-theme))
+                       `(when (eq theme ,target-theme) ,@body))
+                      ((stringp (eval target-theme))
+                       `(when (string-match ,target-theme (symbol-name theme)) ,@body))
+                      ((listp (eval target-theme))
+                       `(when (memq theme ,target-theme) ,@body))))))
+
+(defun gas-theme-set-faces (&rest args)
+  "Override faces' attributes in the `user' theme.
+These settings will remain until a new theme is loaded.
+ARGS are the same as in `custom-set-faces'."
+  (push args gas-theme-faces-changed)
+  (apply 'custom-set-faces args))
+#+END_SRC
+
+**** Themes
+#+BEGIN_SRC emacs-lisp
+(use-package doom-themes :ensure
+  :config
+  (gsetq doom-one-brighter-comments t
+         doom-one-comment-bg nil)
+
+  (after! org (doom-themes-org-config))
+
+  (gas-add-customize-theme-hook "^doom-"
+    (gas-theme-set-faces '(org-level-1 ((t (:height 1.0))))
+                         '(org-level-2 ((t (:height 1.0))))
+                         '(org-level-3 ((t (:height 1.0)))))
+    (custom-theme-set-faces
+     theme
+     '(org-special-keyword ((t (:inherit shadow))))
+     '(git-commit-overlong-summary ((t (:inherit shadow)))))))
+
+(use-package color-theme-sanityinc-tomorrow :ensure
+  :config
+  (gas-add-customize-theme-hook "^sanityinc-"
+    (custom-theme-set-faces
+     theme
+     `(org-special-keyword ((t (:inherit shadow)))))))
+
+(use-package solarized :ensure solarized-theme
+  :config
+  (gsetq solarized-use-variable-pitch nil
+	     solarized-use-more-italic t
+	     solarized-high-contrast-mode-line nil
+	     solarized-scale-org-headlines nil)
+
+  (gas-add-customize-theme-hook 'solarized-dark
+    (solarized-with-color-variables 'dark
+				                    (custom-theme-set-faces
+				                     theme
+				                     `(org-block
+				                       ((t (:foreground ,(color-lighten-name base0 5) :background ,(color-lighten-name base03 5))))))))
+
+  (gas-add-customize-theme-hook 'solarized-light
+    (solarized-with-color-variables 'light
+				                    (custom-theme-set-faces
+				                     theme
+				                     `(org-block
+				                       ((t (:foreground ,(color-darken-name base0 7) :background ,(color-darken-name base03 7)))))))))
+#+END_SRC
+
+**** Extra programming keywords
+#+BEGIN_SRC emacs-lisp
+(defface font-lock-todo-face      '((t (:foreground "#dc322f" :weight bold :underline t))) "Face for TODO keywords.")
+(defface font-lock-important-face '((t (:foreground "#b58900" :weight bold :underline t))) "Face for IMPORTANT keywords.")
+(defface font-lock-note-face      '((t (:foreground "#228b22" :weight bold :underline t))) "Face for NOTE keywords.")
+(defface font-lock-study-face     '((t (:foreground "#41728e" :weight bold :underline t))) "Face for STUDY keywords.")
+(add-hook! prog-mode (font-lock-add-keywords
+                      nil '(("\\<\\(TODO\\|FIXME\\)" 1 'font-lock-todo-face t)
+                            ("\\<\\(IMPORTANT\\)" 1 'font-lock-important-face t)
+                            ("\\<\\(NOTE\\)" 1 'font-lock-note-face t)
+                            ("\\<\\(STUDY\\)" 1 'font-lock-study-face t))))
+#+END_SRC
+
+*** Icons
+#+BEGIN_SRC emacs-lisp
+(use-package all-the-icons :ensure
+  :init
+  (defun gas*disable-all-the-icons-in-tty (orig-fn &rest args)
+    (when (display-graphic-p)
+      (apply orig-fn args)))
+  (dolist (fn '(all-the-icons-octicon all-the-icons-material
+                all-the-icons-faicon all-the-icons-fileicon
+                all-the-icons-wicon all-the-icons-alltheicon))
+    (advice-add fn :around #'gas*disable-all-the-icons-in-tty)))
+#+END_SRC
+
+*** Fringes
+Disable fringes in the minibuffer window.
+
+#+BEGIN_SRC emacs-lisp
+(defun gas|no-fringes-in-minibuffer (&rest _)
+  "Disable fringes in the minibuffer window."
+  (set-window-fringes (minibuffer-window) 0 0 nil))
+(add-hook! '(gas-post-init-hook minibuffer-setup-hook window-configuration-change-hook)
+           #'gas|no-fringes-in-minibuffer)
+#+END_SRC
+
+*** Modeline
+#+BEGIN_SRC emacs-lisp
+(use-package doom-modeline :ensure
+  :config
+  (gsetq doom-modeline-enable-word-count t))
+#+END_SRC
+
+*** Appearance setup
+#+BEGIN_SRC emacs-lisp
+(defun gas-setup-appearance (frame)
+  (with-selected-frame frame
+    (load-theme 'doom-one t)
+    (gas/change-font)
+
+    (doom-modeline-mode)
+
+    (when (and (= (count-windows) 1)
+               (> (window-width) 100))
+      (split-window-right))
+
+    ;; NOTE(gas): This needs to be here, else it doesn't work
+    (gsetq system-time-locale "C")))
+
+(if (daemonp)
+    (add-transient-hook! 'after-make-frame-functions 'gas-setup-appearance)
+  (gas-setup-appearance (selected-frame)))
+#+END_SRC
+
+** Minibuffer completion
+*** Ivy
+better than ido in kashualmodi's opinion.
+#+BEGIN_SRC emacs-lisp
+(use-package ivy :ensure
+  :defer 1
+  :after-call pre-command-hook
+  :bind ("C-x b" . 'ivy-switch-buffer)
+  :config
+  (gsetq ivy-count-format "(%d/%d) "
+         ivy-extra-directories nil
+         ivy-fixed-height-minibuffer t
+         ivy-format-function #'ivy-format-function-line
+         ivy-height 15
+         ivy-initial-inputs-alist nil
+         ivy-magic-slash-non-match-action nil
+         ivy-on-del-error-function nil
+         ivy-use-selectable-prompt t
+         ivy-use-virtual-buffers t
+         ivy-virtual-abbreviate 'full
+         ivy-wrap t)
+
+  (ivy-mode))
+#+END_SRC
+
+**** Ivy hydra
+#+BEGIN_SRC emacs-lisp
+(use-package ivy-hydra
+  :ensure t
+  :commands (ivy-dispatching-done-hydra hydra-ivy/body)
+  :config
+  (progn
+    ;; Re-define the `hydra-ivy' defined in `ivy-hydra' package.
+    (defhydra hydra-ivy (:hint nil
+                         :color pink)
+          "
+^ _,_ ^      _f_ollow      occ_u_r      _g_o          ^^_c_alling: %-7s(if ivy-calling \"on\" \"off\")      _w_(prev)/_s_(next)/_a_(read) action: %-14s(ivy-action-name)
+_p_/_n_      _d_one        ^^           _i_nsert      ^^_m_atcher: %-7s(ivy--matcher-desc)^^^^^^^^^^^^      _C_ase-fold: %-10`ivy-case-fold-search
+^ _._ ^      _D_o it!      ^^           _q_uit        _<_/_>_ shrink/grow^^^^^^^^^^^^^^^^^^^^^^^^^^^^       _t_runcate: %-11`truncate-lines
+"
+          ;; Arrows
+          ("," ivy-beginning-of-buffer)      ;Default h
+          ("p" ivy-previous-line)            ;Default j
+          ("n" ivy-next-line)                ;Default k
+          ("." ivy-end-of-buffer)            ;Default l
+          ;; Quit ivy
+          ("q" keyboard-escape-quit :exit t) ;Default o
+          ("C-g" keyboard-escape-quit :exit t)
+          ;; Quit hydra
+          ("i" nil)
+          ("C-o" nil)
+          ;; actions
+          ("f" ivy-alt-done :exit nil)
+          ;; Exchange the default bindings for C-j and C-m
+          ("C-m" ivy-alt-done :exit nil) ;RET, default C-j
+          ("C-j" ivy-done :exit t)       ;Default C-m
+          ("d" ivy-done :exit t)
+          ("D" ivy-immediate-done :exit t)
+          ("g" ivy-call)
+          ("c" ivy-toggle-calling)
+          ("m" ivy-rotate-preferred-builders)
+          (">" ivy-minibuffer-grow)
+          ("<" ivy-minibuffer-shrink)
+          ("w" ivy-prev-action)
+          ("s" ivy-next-action)
+          ("a" ivy-read-action)
+          ("t" (setq truncate-lines (not truncate-lines)))
+          ("C" ivy-toggle-case-fold)
+          ("u" ivy-occur :exit t)
+          ("?" (ivy-exit-with-action    ;Default D
+                (lambda (_) (find-function #'hydra-ivy/body))) "Definition of this hydra" :exit t))
+
+        (bind-keys
+         :map ivy-minibuffer-map
+         ("C-t" . ivy-rotate-preferred-builders)
+         ("C-o" . hydra-ivy/body)
+         ("M-o" . ivy-dispatching-done-hydra))))
+;(use-package ivy-hydra :ensure
+;  :commands (ivy-dispatching-done-hydra hydra-ivy/body)
+;  :general
+;  (:keymaps 'ivy-minibuffer-map
+;            "C-o" #'hydra-ivy/body
+;            "M-o" #'ivy-dispatching-done-hydra))
+#+END_SRC
+**** Fuzzy matching
+Needed for ivy fuzzy matching.
+
+#+BEGIN_SRC emacs-lisp
+(use-package flx :ensure
+  :after ivy
+  :demand
+  :config
+  (gsetq ivy-re-builders-alist '((counsel-ag . ivy--regex-plus)
+                                 (counsel-rg . ivy--regex-plus)
+                                 (counsel-pt . ivy--regex-plus)
+                                 (counsel-grep . ivy--regex-plus)
+                                 (swiper . ivy--regex-plus)
+                                 (t . ivy--regex-fuzzy))))
+#+END_SRC
+
+*** Counsel
+#+BEGIN_SRC emacs-lisp
+(use-package counsel :ensure
+  :defer 1
+  :after-call pre-command-hook
+  :general
+  (:keymaps 'ivy-minibuffer-map
+   "<return>" 'ivy-alt-done
+   "C-j" 'ivy-done)
+  (:keymaps 'ivy-minibuffer-map
+   "C-r" 'counsel-minibuffer-history)
+
+  :custom
+  (counsel-rg-base-command "rg -zS -M 120 --no-heading --line-number --color never %s .")
+  (counsel-ag-base-command "ag -zS --nocolor --nogroup %s")
+  (counsel-pt-base-command "pt -zS --nocolor --nogroup -e %s")
+  (counsel-grep-base-command
+   (cond ((executable-find "rg") "rg -zS -M 120 --no-heading --line-number --color never %s %s")
+         ((executable-find "ag") "ag -zS --nocolor --nogroup %s %s")
+         (t "grep -i -E -n -e %s %s")))
+  (counsel-find-file-ignore-regexp "\\(?:^[#.]\\)\\|\\(?:[#~]$\\)\\|\\(?:^Icon?\\)")
+
+  :config
+  (defun counsel-find-file-as-root (x)
+    "Find file X with root privileges."
+    (counsel-require-program counsel-root-command)
+    (let* ((method (file-remote-p x 'method))
+           (user (file-remote-p x 'user))
+           (host (file-remote-p x 'host))
+           (file-name (concat (if (string= method "ssh")
+                                  (format "/ssh:%s%s|"
+                                          (if user (format "%s@" user) "")
+                                          host)
+                                "/")
+                              (format "%s:%s:%s"
+                                      counsel-root-command
+                                      (or host "")
+                                      (expand-file-name
+                                       (if host
+                                           (file-remote-p x 'localname)
+                                         x))))))
+      (if (eq (current-buffer) (get-file-buffer x))
+          (find-alternate-file file-name)
+        (find-file file-name))))
+
+  (counsel-mode))
+#+END_SRC
+
+**** Better ~counsel-M-x~
+#+BEGIN_SRC emacs-lisp
+(use-package amx :ensure
+  :custom
+  (amx-save-file (concat gas-cache-dir "/amx-items")))
+#+END_SRC
+
+** Editor
+*** Settings
+#+BEGIN_SRC emacs-lisp
+(gsetq vc-follow-symlinks t
+       save-interprogram-paste-before-kill t
+       enable-recursive-minibuffers t
+       mouse-yank-at-point t)
+
+#+END_SRC
+
+**** Whitespace, indentation & formatting
+#+BEGIN_SRC emacs-lisp
+(gsetq tab-width 4
+       indent-tabs-mode nil
+       require-final-newline t
+       mode-require-final-newline t
+       sentence-end-double-space nil
+       tab-always-indent t
+       tabify-regexp "^\t* [ \t]+"
+       fill-column 90
+       word-wrap t
+       truncate-lines t
+       truncate-partial-width-windows 70)
+
+(add-hook! 'before-save-hook #'delete-trailing-whitespace)
+(add-hook! 'after-save-hook #'executable-make-buffer-file-executable-if-script-p)
+#+END_SRC
+
+**** Scrolling
+#+BEGIN_SRC emacs-lisp
+(gsetq scroll-margin 1
+       hscroll-margin 2
+       hscroll-step 1
+       scroll-conservatively 101
+       scroll-preserve-screen-position t
+       mouse-wheel-scroll-amount '(1)
+       mouse-wheel-progressive-speed nil)
+#+END_SRC
+
+**** Limits
+#+BEGIN_SRC emacs-lisp
+(gsetq kill-ring-max 5000
+       undo-limit (* 20 1024 1024)
+       undo-strong-limit (* 40 1024 1024)
+       undo-outer-limit (* 100 1024 1024)
+       mark-ring-max 5000
+       global-mark-ring-max 5000)
+#+END_SRC
+
+**** Automatic revert
+#+BEGIN_SRC emacs-lisp
+(use-package autorevert
+  :after-call after-find-file
+  :custom
+  (auto-revert-verbose nil)
+  :config
+  (global-auto-revert-mode))
+#+END_SRC
+
+**** Recent files
+#+BEGIN_SRC emacs-lisp
+(use-package recentf
+  :defer 1
+  :after-call after-find-file
+  :commands recentf-open-files
+  :config
+  (setq recentf-save-file (concat gas-cache-dir "recentf")
+        recentf-auto-cleanup 120
+        recentf-max-menu-items 0
+        recentf-max-saved-items 300
+        recentf-filename-handlers '(file-truename)
+        recentf-exclude
+        (list #'file-remote-p "\\.\\(?:gz\\|gif\\|svg\\|png\\|jpe?g\\)$"
+              "^/tmp/" "^/ssh:" "\\.?ido\\.last$" "\\.revive$" "/TAGS$"
+              "^/var/folders/.+$"
+              (lambda (file) (file-in-directory-p file gas-local-dir))))
+  (quiet! (recentf-mode)))
+#+END_SRC
+
+**** Bookmarks
+#+BEGIN_SRC emacs-lisp
+(use-package bookmark
+  :custom
+  (bookmark-default-file (concat gas-etc-dir "bookmarks"))
+  (bookmark-save-flag t))
+#+END_SRC
+
+*** Swiper
+#+BEGIN_SRC emacs-lisp
+(use-package swiper :ensure
+  :bind (("C-r" . swiper)
+	       ("C-s" . counsel-grep-or-swiper)
+         ("C-S-s" . isearch-forward))
+  :config
+  (add-to-list 'swiper-font-lock-exclude 'c-mode)
+  (add-to-list 'swiper-font-lock-exclude 'c++-mode))
+#+END_SRC
+
+*** Company
+#+BEGIN_SRC emacs-lisp
+(use-package company :ensure
+  :after-call (pre-command-hook after-find-file dired-before-readin-hook)
+  :bind ("C-:" . company-complete)  ; In case I don't want to wait
+    :config
+  (gsetq company-idle-delay nil
+         company-tooltip-limit 15
+         company-tooltip-align-annotations t
+         company-require-match 'never
+         company-global-modes '(not comint-mode erc-mode message-mode help-mode gud-mode)
+         company-frontends '(company-pseudo-tooltip-frontend company-echo-metadata-frontend)
+         company-transformers '(company-sort-by-occurrence))
+
+  (setq-hook! prog-mode
+    company-backends '((:separate company-dabbrev-code company-capf company-yasnippet)))
+
+  (setq-hook! text-mode
+    company-backends '((:separate company-dabbrev company-capf company-yasnippet)))
+
+  (global-company-mode))
+
+(use-package company-dabbrev
+  :custom
+  (company-dabbrev-downcase nil)
+  (company-dabbrev-ignore-case nil)
+  (company-dabbrev-ignore-invisible t)
+  (company-dabbrev-code-other-buffers t)
+
+  :config
+  (defun gas-company-dabbrev-buffer-check (buffer)
+    (with-current-buffer buffer (derived-mode-p 'pdf-view-mode
+                                                'doc-view-mode)))
+  (gsetq company-dabbrev-ignore-buffers #'gas-company-dabbrev-buffer-check))
+#+END_SRC
+
+*** Projects
+#+BEGIN_SRC emacs-lisp
+(use-package projectile :ensure
+  :after-call (pre-command-hook after-find-file dired-before-readin-hook)
+  :commands (projectile-project-root projectile-project-name projectile-project-p)
+ ;; :general ("C-c p" '(:keymap projectile-command-map :wk "Projectile"))
+  :bind ("C-c p" . hydra-projectile/body)
+  :init
+  (gsetq projectile-cache-file (concat gas-cache-dir "projectile.cache")
+         projectile-indexing-method (if IS-WINDOWS 'native 'alien)
+         projectile-known-projects-file (concat gas-cache-dir "projectile.projects")
+         projectile-globally-ignored-files '(".DS_Store" "Icon" "TAGS")
+         projectile-globally-ignored-file-suffixes '(".elc" ".pyc" ".o")
+         projectile-ignored-projects '("~" "/tmp"))
+
+  :config
+  (gsetq projectile-globally-ignored-directories (append projectile-globally-ignored-directories
+                                                         (list (abbreviate-file-name gas-local-dir)
+                                                               ".sync" "node_modules" "flow-typed"))
+         projectile-other-file-alist (append projectile-other-file-alist
+                                             '(("css"  "scss" "sass" "less" "styl")
+                                               ("scss" "css")
+                                               ("sass" "css")
+                                               ("less" "css")
+                                               ("styl" "css"))))
+  (push ".project" projectile-project-root-files-bottom-up)
+
+  (add-hook 'dired-before-readin-hook #'projectile-track-known-projects-find-file-hook)
+
+  ;; NOTE(gas): Projectile root-searching functions can cause an infinite loop on TRAMP
+  ;; connections, so disable them
+  (defun gas*projectile-locate-dominating-file (orig-fn &rest args)
+    "Don't traverse the file system if on a remote connection."
+    (unless (file-remote-p default-directory)
+      (apply orig-fn args)))
+  (advice-add #'projectile-locate-dominating-file :around #'gas*projectile-locate-dominating-file)
+
+  (defun gas*projectile-cache-current-file (orig-fun &rest args)
+    "Don't cache ignored files."
+    (unless (cl-loop for path in (projectile-ignored-directories)
+                     if (string-prefix-p (or buffer-file-name "") (expand-file-name path))
+                     return t)
+      (apply orig-fun args)))
+  (advice-add #'projectile-cache-current-file :around #'gas*projectile-cache-current-file)
+
+  (defhydra hydra-projectile (:color teal
+                                :hint  nil)
+      "
+     PROJECTILE: %(if (fboundp 'projectile-project-root) (projectile-project-root) \"TBD\")
+^^^^       Find               ^^   Search/Tags       ^^^^       Buffers               ^^   Cache                     ^^^^       Other
+^^^^--------------------------^^---------------------^^^^-----------------------------^^------------------------------------------------------------------
+_f_/_s-f_: file               _a_: ag                ^^    _i_: Ibuffer               _c_: cache clear               ^^    _E_: edit project's .dir-locals.el
+^^    _F_: file dwim          _G_: update gtags      ^^    _b_: switch to buffer      _x_: remove known project      _s-p_/_p_: switch to other project
+^^    _d_: file curr dir      _o_: multi-occur       _K_/_s-k_: kill all buffers      _X_: cleanup non-existing      ^^    _g_: switch to Magit status of other project
+^^    _l_: file literally     ^^                     ^^^^                             _z_: cache current             ^^    _P_: switch to an open project
+^^    _r_: recent file        ^^                     ^^^^                             ^^                             ^^    _D_: find dir
+"
+      ("a"   projectile-ag)
+      ("b"   projectile-switch-to-buffer)
+      ("c"   projectile-invalidate-cache)
+      ("d"   projectile-find-file-in-directory)
+      ("f"   projectile-find-file)
+      ("s-f" projectile-find-file)
+      ("F"   projectile-find-file-dwim)
+      ("D"   projectile-find-dir)
+      ("E"   projectile-edit-dir-locals)
+  ;    ("g"   modi/projectile-switch-project-magit-status)
+   ;   ("G"   ggtags-update-tags)
+      ("i"   projectile-ibuffer)
+      ("K"   projectile-kill-buffers)
+      ("s-k" projectile-kill-buffers)
+   ;   ("l"   modi/projectile-find-file-literally)
+      ("m"   projectile-multi-occur)
+      ("o"   projectile-multi-occur)
+      ("p"   projectile-switch-project)
+      ("s-p" projectile-switch-project)
+      ("P"   projectile-switch-open-project)
+      ("s"   projectile-switch-project)
+      ("r"   projectile-recentf)
+      ("x"   projectile-remove-known-project)
+      ("X"   projectile-cleanup-known-projects)
+      ("z"   projectile-cache-current-file)
+   ;   ("4"   hydra-projectile-other-window/body "other window")
+      ("q"   nil "cancel" :color blue))
+
+  (projectile-mode))
+
+(use-package counsel-projectile :ensure
+  :general
+  (:keymaps 'projectile-command-map "SPC" 'counsel-projectile)
+  ([remap projectile-find-file]        #'counsel-projectile-find-file)
+  ([remap projectile-find-dir]         #'counsel-projectile-find-dir)
+  ([remap projectile-switch-to-buffer] #'counsel-projectile-switch-to-buffer)
+  ([remap projectile-grep]             #'counsel-projectile-grep)
+  ([remap projectile-ag]               #'counsel-projectile-ag)
+  ([remap projectile-switch-project]   #'counsel-projectile-switch-project)
+
+  :custom
+  (projectile-completion-system 'ivy))
+#+END_SRC
+
+*** Navigation
+**** Avy
+#+BEGIN_SRC emacs-lisp
+(use-package avy :ensure
+  :bind
+  ("C-:"   .  #'avy-goto-char)
+  ("C-'"   .  #'avy-goto-char-timer)
+  ("M-g f" .  #'avy-goto-line)
+  ("M-g w" .  #'avy-goto-word-1)
+  :config
+  (gsetq avy-all-windows nil
+         avy-background t))
+#+END_SRC
+
+**** Dumb jump
+#+BEGIN_SRC emacs-lisp
+(use-package dumb-jump :ensure
+  :commands dumb-jump-result-follow
+  :bind
+  ("M-g j" #'gas@dumb-jump/body)
+  :config
+  (defhydra gas@dumb-jump (:color blue :columns 3)
+    "Dumb Jump"
+    ("j" dumb-jump-go "Go")
+    ("o" dumb-jump-go-other-window "Other window")
+    ("e" dumb-jump-go-prefer-external "Go external")
+    ("x" dumb-jump-go-prefer-external-other-window "Go external other window")
+    ("i" dumb-jump-go-prompt "Prompt")
+    ("l" dumb-jump-quick-look "Quick look")
+    ("b" dumb-jump-back "Back"))
+
+  (setq dumb-jump-selector 'ivy
+        dumb-jump-default-project gas-emacs-dir
+        dumb-jump-aggressive nil
+        dumb-jump-use-visible-window nil))
+#+END_SRC
+
+**** Imenu
+#+BEGIN_SRC emacs-lisp
+(use-package imenu
+  :custom
+  (imenu-auto-rescan-maxout 500000)
+  (imenu-auto-rescan t))
+
+(use-package imenu-anywhere :ensure
+  :init (global-set-key (kbd "C-.") 'imenu-anywhere)
+;;  :general (gas-leader "i" 'imenu-anywhere)
+  :custom
+  (imenu-anywhere-delimiter ": ")
+  :config (defun jcs-use-package ()
+            (add-to-list 'imenu-generic-expression
+             '("Used Packages"
+               "\\(^\\s-*(use-package +\\)\\(\\_<.+\\_>\\)" 2)))
+  (add-hook 'emacs-lisp-mode-hook #'jcs-use-package))
+#+END_SRC
+
+**** Recenter after jumping
+#+BEGIN_SRC emacs-lisp
+(add-hook!
+  '(imenu-after-jump-hook
+    evil-jumps-post-jump-hook
+    counsel-grep-post-action-hook
+    dumb-jump-after-jump-hook)
+  #'recenter)
+#+END_SRC
+
+*** Electric
+#+BEGIN_SRC emacs-lisp
+(use-package electric
+  :init
+  (electric-indent-mode))
+
+(use-package elec-pair
+  :init
+  (electric-pair-mode))
+#+END_SRC
+
+*** Selection
+**** Expand region
+#+BEGIN_SRC emacs-lisp
+(use-package expand-region :ensure)
+#+END_SRC
+
+**** Multiple cursors
+#+BEGIN_SRC emacs-lisp
+(use-package multiple-cursors :ensure
+  :bind
+  ("C-c l"       . 'mc/edit-lines
+   "M-»"         . 'mc/mark-next-like-this
+   "M-«"         . 'mc/mark-previous-like-this
+   "C-M-»"       . 'mc/mark-all-like-this
+   "M-<mouse-1>" . 'mc/add-cursor-on-click))
+#+END_SRC
+
+*** Large file verification
+#+BEGIN_SRC emacs-lisp
+(setq large-file-warning-threshold (* 100 1024 1024))
+
+(defvar gas-large-file-size 10
+  "Size (in MB) above which the user will be prompted to open the file literally
+to avoid performance issues. Opening literally means that no major or minor
+modes are active and the buffer is read-only.")
+
+(defvar gas-large-file-modes-list
+  '(fundamental-mode special-mode archive-mode tar-mode jka-compr
+    git-commit-mode image-mode doc-view-mode doc-view-mode-maybe
+    ebrowse-tree-mode pdf-view-mode)
+  "Major modes that `gas|check-large-file' will ignore.")
+
+(defun gas|check-large-file ()
+  "Check if the buffer's file is large (see `gas-large-file-size'). If so, ask
+for confirmation to open it literally (read-only, disabled undo and in
+fundamental-mode) for performance sake."
+  (when (and (not (memq major-mode gas-large-file-modes-list))
+             auto-mode-alist
+             (get-buffer-window))
+    (when-let* ((size (nth 7 (file-attributes buffer-file-name))))
+      (when (and (> size (* 1024 1024 gas-large-file-size))
+                 (y-or-n-p
+                  (format (concat "%s is a large file, open literally to "
+                                  "avoid performance issues?")
+                          (file-relative-name buffer-file-name))))
+        (setq buffer-read-only t)
+        (buffer-disable-undo)
+        (fundamental-mode)))))
+(add-hook 'find-file-hook #'gas|check-large-file)
+#+END_SRC
+
+** Programming languages
+*** C/C++
+#+BEGIN_SRC emacs-lisp
+(use-package cc-mode
+  :mode (("\\.\\(c\\|h\\)\\'" . c-mode)
+         ("\\.\\(c\\|h\\)pp\\'" . c++-mode)
+         ("\\.ino\\'" . c++-mode))
+  :config
+  (defun gas-header-format ()
+    (interactive)
+    (let ((definition
+            (concat (upcase (file-name-sans-extension (file-name-nondirectory buffer-file-name))) "_H")))
+      (insert (format "#if !defined(%s)\n#define %s\n\n\n\n#endif // %s" definition definition definition))
+      (forward-line -2)))
+
+  (defun gas-c-hook ()
+    (c-set-style "GasStyle")
+    (c-toggle-auto-hungry-state -1)
+    (if (and buffer-file-name
+             (not (file-exists-p buffer-file-name))
+             (string-match "\\.h\\(pp\\)?\\'" buffer-file-name))
+        (gas-header-format)))
+  (add-hook! c-mode-common #'gas-c-hook)
+
+  (gsetq c-hanging-semi&comma-criteria '((lambda () 'stop)))
+
+  (c-add-style
+   "GasStyle"
+   '((c-tab-always-indent . t)
+     (c-comment-only-line-offset . 0)
+
+     (c-hanging-braces-alist . ((block-close)
+                                (block-open)
+                                (brace-list-close)
+                                (brace-list-entry)
+                                (brace-list-intro)
+                                (brace-list-open)
+                                (class-close)
+                                (class-open)
+                                (class-open)
+                                (defun-close)
+                                (defun-open)
+                                (inline-close)
+                                (inline-open)
+                                (statement-case-open)
+                                (substatement-open)))
+
+     (c-hanging-colons-alist . ((access-key)
+                                (access-label)
+                                (case-label)
+                                (inher-intro)
+                                (label)
+                                (member-init-intro)))
+
+     (c-cleanup-list . (scope-operator list-close-comma defun-close-semi))
+
+     (c-offsets-alist . ((access-label . -4)
+                         (arglist-close . c-lineup-arglist)
+                         (block-open . 0)
+                         (brace-list-intro . 4)
+                         (brace-list-open . 0)
+                         (case-label . 4)
+                         (inline-open . 0)
+                         (knr-argdecl-intro . -4)
+                         (label . 0)
+                         (member-init-intro . ++)
+                         (statement-case-intro . 4)
+                         (substatement-open . 0)
+                         (substatement-label . 0)
+                         (topmost-intro-cont . 0)))
+
+     (c-echo-syntactic-information-p . t))))
+#+END_SRC
+
+*** Go
+#+BEGIN_SRC emacs-lisp
+(use-package go-mode :ensure
+  :custom (gofmt-command (substitute-in-file-name "$GOPATH/bin/goimports"))
+  :config
+  (add-hook! go-mode (add-hook! :local 'before-save-hook 'gofmt-before-save)))
+#+END_SRC
+
+*** Lisp
+#+BEGIN_SRC emacs-lisp
+(use-package lisp-mode
+  :config
+  (defun gas-lisp-indent-function (indent-point state)
+    "This function is the normal value of the variable `lisp-indent-function'.
+The function `calculate-lisp-indent' calls this to determine
+if the arguments of a Lisp function call should be indented specially.
+INDENT-POINT is the position at which the line being indented begins.
+Point is located at the point to indent under (for default indentation);
+STATE is the `parse-partial-sexp' state for that position.
+If the current line is in a call to a Lisp function that has a non-nil
+property `lisp-indent-function' (or the deprecated `lisp-indent-hook'),
+it specifies how to indent.  The property value can be:
+,,* `defun', meaning indent `defun'-style
+  \(this is also the case if there is no property and the function
+  has a name that begins with \"def\", and three or more arguments);
+,,* an integer N, meaning indent the first N arguments specially
+  (like ordinary function arguments), and then indent any further
+  arguments like a body;
+,,* a function to call that returns the indentation (or nil).
+  `lisp-indent-function' calls this function with the same two arguments
+  that it itself received.
+This function returns either the indentation to use, or nil if the
+Lisp function does not specify a special indentation."
+    (let ((normal-indent (current-column))
+          (orig-point (point)))
+      (goto-char (1+ (elt state 1)))
+      (parse-partial-sexp (point) calculate-lisp-indent-last-sexp 0 t)
+      (cond
+       ;; car of form doesn't seem to be a symbol, or is a keyword
+       ((and (elt state 2)
+             (or (not (looking-at "\\sw\\|\\s_"))
+                 (looking-at ":")))
+        (if (not (> (save-excursion (forward-line 1) (point))
+                    calculate-lisp-indent-last-sexp))
+            (progn (goto-char calculate-lisp-indent-last-sexp)
+                   (beginning-of-line)
+                   (parse-partial-sexp (point)
+                                       calculate-lisp-indent-last-sexp 0 t)))
+        ;; Indent under the list or under the first sexp on the same
+        ;; line as calculate-lisp-indent-last-sexp.  Note that first
+        ;; thing on that line has to be complete sexp since we are
+        ;; inside the innermost containing sexp.
+        (backward-prefix-chars)
+        (current-column))
+       ((and (save-excursion
+               (goto-char indent-point)
+               (skip-syntax-forward " ")
+               (not (looking-at ":")))
+             (save-excursion
+               (goto-char orig-point)
+               (looking-at ":")))
+        (save-excursion
+          (goto-char (+ 2 (elt state 1)))
+          (current-column)))
+       (t
+        (let ((function (buffer-substring (point)
+                                          (progn (forward-sexp 1) (point))))
+              method)
+          (setq method (or (function-get (intern-soft function)
+                                         'lisp-indent-function)
+                           (get (intern-soft function) 'lisp-indent-hook)))
+          (cond ((or (eq method 'defun)
+                     (and (null method)
+                          (> (length function) 3)
+                          (string-match "\\`def" function)))
+                 (lisp-indent-defform state indent-point))
+                ((integerp method)
+                 (lisp-indent-specform method state
+                                       indent-point normal-indent))
+                (method
+                 (funcall method indent-point state))))))))
+
+  (setq-hook! (lisp-mode emacs-lisp-mode)
+    lisp-indent-function 'gas-lisp-indent-function))
+
+#+END_SRC
+
+*** Clojure
+#+BEGIN_SRC emacs-lisp
+(use-package clojure-mode
+  :defer
+  :mode (("\\.edn$"  . clojurec-mode)
+         ("\\.boot$" . clojure-mode)
+         ("\\.cljs$" . clojurescript-mode)
+         ("\\.cljc$" . clojurec-mode)
+         )
+  :init
+  (defconst clojure--prettify-symbols-alist
+    '(("fn"   . ?λ)
+      ("__"   . ?⁈)
+      ("<=" . ?≤)
+      (">=" . ?≥)
+      ("<-" . ?←)
+      ("->" . ?→)
+      ("<=" . ?⇐)
+      ("=>" . ?⇒)
+      ("lambda" . ?λ)
+      ))
+  :config
+  (add-hook! :append :local clojure-mode '(yas-minor-mode subword-mode global-prettify-symbols-mode))
+;;  (add-hook! :local clojure-mode 'subword-mode)
+;;  (add-hook! :local clojure-mode 'global-prettify-symbols-mode)
+  (defun figwheel-repl ()
+   (interactive)
+   (inf-clojure "clojure -Afig"))
+)
+
+(use-package cider
+  :defer
+  :init
+  (setq cider-auto-select-error-buffer t
+        cider-repl-pop-to-buffer-on-connect nil
+        cider-repl-use-clojure-font-lock t
+        cider-repl-wrap-history t
+        cider-repl-history-size 1000
+        cider-show-error-buffer t
+        nrepl-hide-special-buffers t
+        ;; Stop error buffer from popping up while working in buffers other than the REPL:
+        nrepl-popup-stacktraces nil)
+
+  :bind  (:map cider-mode-map
+               ("C-c C-v C-c" . cider-send-and-evaluate-sexp)
+               ("C-c C-p"     . cider-eval-print-last-sexp))
+  :config
+  (add-hook 'cider-repl-mode-hook #'company-mode)
+  (add-hook 'cider-mode-hook #'company-mode)
+  (add-hook 'cider-mode-hook #'eldoc-mode)
+  ;; (add-hook 'cider-mode-hook #'cider-hydra-mode)
+  ;; (add-hook 'clojure-mode-hook #'paredit-mode)
+  (setq cider-repl-use-pretty-printing t)
+  (setq cider-repl-display-help-banner nil)
+  (defun cider-send-and-evaluate-sexp ()
+  "Sends the s-expression located before the point or the active
+      region to the REPL and evaluates it. Then the Clojure buffer is
+      activated as if nothing happened."
+  (interactive)
+  (if (not (region-active-p))
+      (cider-insert-last-sexp-in-repl)
+    (cider-insert-in-repl
+     (buffer-substring (region-beginning) (region-end)) nil))
+  (cider-switch-to-repl-buffer)
+  (cider-repl-closing-return)
+  (cider-switch-to-last-clojure-buffer)
+  (message ""))
+  ;;(  cider-namespace-refresh)
+  )
+
+;; cider comments
+(defun ha/cider-append-comment ()
+  (when (null (nth 8 (syntax-ppss)))
+    (insert " ; ")))
+
+(advice-add 'cider-eval-print-last-sexp :before #'ha/cider-append-comment)
+
+;; cider to work with org-mode
+(setq org-babel-clojure-backend 'cider)
+#+END_SRC
+*** Web
+#+BEGIN_SRC emacs-lisp
+(use-package web-mode :ensure
+  :mode (("\\.\\(go\\)?html?\\'" . web-mode)))
+#+END_SRC
+
+** Org Mode
+*** Base configuration
+#+BEGIN_SRC emacs-lisp
+(use-package org
+ :ensure
+ :init
+       (font-lock-add-keywords 'org-mode
+        '(("^ +\\([-*]\\) "
+               (0 (prog1 () (compose-region (match-beginning 1) (match-end 1) "•"))))))
+ :bind (("C-c l" . org-store-link)
+         ("C-c c" . org-capture)
+         ("C-M-|" . indent-rigidly)
+         ("C-c a" . org-agenda)
+         ("C-M-|" . indent-rigidly)
+         :map org-mode-map
+         ("M-n" . outline-next-visible-heading)
+         ("M-p" . outline-previous-visible-)
+         ("M-C-n" . org-end-of-item-list)
+         ("M-C-p" . org-beginning-of-item-list)
+         ("C-s-f" . forward-sentence)
+         ("C-s-b" . backward-sentence)
+        )
+
+  :config
+  (gsetq org-modules '(org-habit org-id org-protocol org-timer org-bullets))
+  (use-package org-bullets
+  :ensure t
+  :init (add-hook 'org-mode-hook 'org-bullets-mode))
+
+
+#+END_SRC
+
+**** Directories and files
+#+BEGIN_SRC emacs-lisp
+(gsetq org-directory "~/org/gtd/")
+(defconst gas-org-agenda-file (concat org-directory "atea.org"))
+(defconst gas-org-journal-file (concat org-directory "journal.org"))
+(gsetq org-default-notes-file (concat org-directory "inbox.org")
+       org-agenda-files (list gas-org-agenda-file))
+#+END_SRC
+
+**** Appearance
+#+BEGIN_SRC emacs-lisp
+(gsetq org-startup-indented t
+       org-startup-with-inline-images t
+       org-startup-with-latex-preview t
+       org-pretty-entities t
+       org-image-actual-width '(700)
+       org-fontify-quote-and-verse-blocks t)
+
+(add-hook! org-mode #'org-hide-block-all)
+#+END_SRC
+
+**** Behaviour
+#+BEGIN_SRC emacs-lisp
+(gsetq  org-tags-column -92
+        org-ellipsis " ↴ "
+        org-catch-invisible-edits 'smart
+        org-return-follows-link t
+        org-list-allow-alphabetical t
+        org-loop-over-headlines-in-active-region t
+        org-blank-before-new-entry '((heading . t) (plain-list-item . auto)))
+
+(defun gas|org-summary-todo (n-done n-not-done)
+  "Update todo keyword after changing the statistics cookie, when needed."
+  (let ((keyword (org-get-todo-state)))
+    (if (= n-not-done 0)
+        (when (not (member keyword org-done-keywords)) (org-todo "FINI"))
+      (when (member keyword org-done-keywords) (org-todo "TODO")))))
+(add-hook! 'org-after-todo-statistics-hook #'gas|org-summary-todo)
+
+(defun gas|org-project-set-next-after-done ()
+  "Ask to move TODO to PROCHAINE when changing previous states from FINI."
+  (let ((done-keywords (or org-done-keywords org-done-keywords-for-agenda)))
+    (when (and (member org-state done-keywords) (+org-is-subtask))
+      (org-with-wide-buffer
+       (org-back-to-heading t)
+
+       (let (point keyword break)
+         (while (and (save-excursion (setq point (org-get-last-sibling))) (not break))
+           (goto-char point)
+           (setq keyword (org-get-todo-state))
+           (when (or (member keyword done-keywords)
+                     (and (not (+org-project-p))
+                          (string= keyword "TODO")))
+             (setq break t)
+             (org-get-next-sibling))))
+
+       (let (target keyword break)
+         (while (not (or target break))
+           (setq keyword (org-get-todo-state))
+           (unless (+org-project-p)
+             (if (string= keyword "TODO")
+                 (setq target (cons (point) (org-get-heading t t t t)))
+               (setq break (string= keyword "PROCHAINE"))))
+           (setq break (or break (not (org-get-next-sibling)))))
+
+         (when (consp target)
+           (when (y-or-n-p (concat "Voulez-vous mettre " (cdr target) "à PROCHAINE?"))
+             (goto-char (car target))
+             (org-todo "PROCHAINE"))))))))
+(add-hook 'org-after-todo-state-change-hook #'gas|org-project-set-next-after-done)
+#+END_SRC
+
+**** Tasks and states
+#+BEGIN_SRC emacs-lisp
+(gsetq
+ org-todo-keywords '(
+     (sequence "TODO(t)" "PROCHAINE(n)" "|" "FINI(f)")
+     (sequence "[ ](t)" "[-](p)" "[?](m)" "|" "[X](d)")
+     (sequence "SUSPENDUE(h@/!)" "ATTENTE(w@/!)" "|" "ANNULÉE(c@/!)"))
+ org-treat-S-cursor-todo-selection-as-state-change nil
+ org-columns-default-format "%80ITEM(Task) %10Effort(Effort){:} %10CLOCKSUM"
+ org-global-properties '(("Effort_ALL" . "0:15 0:30 0:45 1:00 1:30 2:00 3:00 4:00 5:00 7:00")))
+#+END_SRC
+
+**** Refiling
+#+BEGIN_SRC emacs-lisp
+(gsetq org-refile-use-outline-path 'file
+       org-outline-path-complete-in-steps nil
+       org-refile-allow-creating-parent-nodes 'confirm
+       org-refile-targets `((nil . (:maxlevel . 9))
+                            (org-agenda-files . (:maxlevel . 9))))
+
+(add-hook! 'org-after-refile-insert-hook
+  (org-up-heading-safe)
+  (org-update-statistics-cookies nil))
+#+END_SRC
+
+**** Templates
+#+BEGIN_SRC emacs-lisp
+ (use-package hydra
+  :config
+  ;; Define the templates
+  (setq org-structure-template-alist
+        '(("s" "#+begin_src ?\n\n#+end_src" "<src lang=\"?\">\n\n</src>")
+          ("e" "#+begin_example\n?\n#+end_example" "<example>\n?\n</example>")
+          ("q" "#+begin_quote\n?\n#+end_quote" "<quote>\n?\n</quote>")
+          ("v" "#+begin_verse\n?\n#+end_verse" "<verse>\n?\n/verse>")
+          ("n" "#+begin_note\n?\n#+end_note" "<note>\n?\n/note>")
+          ("c" "#+begin_center\n?\n#+end_center" "<center>\n?\n/center>")
+          ("l" "#+begin_export latex\n?\n#+end_export" "<literal style=\"latex\">\n?\n</literal>")
+          ("L" "#+latex: " "<literal style=\"latex\">?</literal>")
+          ("h" "#+begin_export html\n?\n#+end_exrt" "<literal style=\"html\">\n?\n</literal>")
+          ("H" "#+html: " "<literal style=\"html\">?</literal>")
+          ("a" "#+begin_export ascii\n?\n#+end_export")
+          ("A" "#+ascii: ")
+          ("i" "#+index: ?" "#+index: ?")
+          ("I" "#+include: %file ?" "<include file=%file markup=\"?\">")))
+
+  ;; Shortcuts
+  (defun hot-expand (str &optional mod)
+    "Expand org template."
+    (let (text)
+      (when (region-active-p)
+        (setq text (buffer-substring (region-beginning) (region-end)))
+        (delete-region (region-beginning) (region-end)))
+      (insert str)
+      (org-try-structure-completion)
+      (when mod (insert mod) (forward-line))
+      (when text (insert text))))
+
+  (defhydra hydra-org-template (:color blue :hint nil)
+    "
+     Org template
+
+ block               src block         structure
+--------------------------------------------------------------------------------------
+_C_: center        _s_: src         _L_: LATEX:
+_q_: quote         _e_: emacs lisp  _i_: index:
+_E_: example       _p_: python      _I_: INCLUDE:
+_v_: verse         _P_: perl        _H_: HTML:
+_a_: ascii         _u_: Plantuml    _A_: ASCII:
+_l_: latex         _d_: ditaa
+_h_: html          _S_: shell
+_n_: note          _c_: clojure
+"
+    ("s" (hot-expand "<s"))
+    ("E" (hot-expand "<e"))
+    ("q" (hot-expand "<q"))
+    ("v" (hot-expand "<v"))
+    ("C" (hot-expand "<c"))
+    ("l" (hot-expand "<l"))
+    ("h" (hot-expand "<h"))
+    ("n" (hot-expand "<n"))
+    ("a" (hot-expand "<a"))
+    ("L" (hot-expand "<L"))
+    ("i" (hot-expand "<i"))
+    ("e" (hot-expand "<s" "emacs-lisp"))
+    ("p" (hot-expand "<s" "python"))
+    ("P" (hot-expand "<s" "perl"))
+    ("j" (hot-expand "<s" "java"))
+    ("c" (hot-expand "<s" "clojure"))
+    ("S" (hot-expand "<s" "sh"))
+    ("d" (hot-expand "<s" "ditaa :file CHANGE.png :cache yes"))
+    ("u" (hot-expand "<s" "plantuml :file CHANGE.svg :cache yes"))
+    ("I" (hot-expand "<I"))
+    ("H" (hot-expand "<H"))
+    ("A" (hot-expand "<A"))
+    ("<" self-insert-command "ins")
+    ("ESC" nil "quit"))
+
+  (define-key org-mode-map "<"
+    (lambda () (interactive)
+      (if (or (region-active-p) (looking-back "^"))
+          (hydra-org-template/body)
+        (self-insert-command 1)))))
+#+END_SRC
+**** Logging
+#+BEGIN_SRC emacs-lisp
+(gsetq org-log-done 'time
+       org-log-reschedule 'time
+       org-log-into-drawer t)
+#+END_SRC
+
+**** Babel
+#+BEGIN_SRC emacs-lisp
+(gsetq org-confirm-babel-evaluate nil)
+
+(org-babel-do-load-languages
+ 'org-babel-load-languages
+ '((gnuplot . t)
+   (octave . t)
+   (clojure . t)
+   (python . t)
+   (latex . t)
+   (shell . t)
+   (calc . t)))
+
+(add-hook 'org-babel-after-execute-hook 'org-redisplay-inline-images)
+#+END_SRC
+
+***** Octave
+#+BEGIN_SRC emacs-lisp
+(use-package ob-octave
+  :config
+  ;; NOTE(gas): Remove whitespace from beginning when printing output
+  (defun gas*org-babel-octave-trim-output (orig-func session body result-type &optional matlabp)
+    (let ((result (funcall orig-func session body result-type matlabp)))
+      (if (eq result-type 'output)
+          (string-trim-left result)
+        result)))
+  (advice-add 'org-babel-octave-evaluate-session :around 'gas*org-babel-octave-evaluate-session))
+#+END_SRC
+
+***** Sessions
+#+BEGIN_SRC emacs-lisp
+(defun +babel-get-src-info ()
+  "Return (LANG . SESSION)."
+  (let* ((info (org-babel-get-src-block-info t))
+         (params (nth 2 info)))
+    (cons (car info)
+          (cdr (assq :session params)))))
+
+(defun +babel/kill-session ()
+  "Kill session for current code block."
+  (interactive)
+  (org-babel-when-in-src-block
+   (let ((config (current-window-configuration)))
+     (org-babel-switch-to-session)
+     (set-process-query-on-exit-flag (get-buffer-process (current-buffer)) nil)
+     (kill-buffer)
+     (set-window-configuration config))))
+
+(defun +babel/restart-session-to-point (&optional arg)
+  "Restart session up to the src-block in the current point.
+Goes to beginning of buffer and executes each code block with
+`org-babel-execute-src-block' that has the same language and
+session as the current block. ARG has same meaning as in
+`org-babel-execute-src-block'."
+  (interactive "P")
+  (org-babel-when-in-src-block
+   (let ((search-bound (point-marker))
+         (info (+babel-get-src-info))
+         break)
+     (org-with-wide-buffer
+      (goto-char (point-min))
+      (while (and (not break) (re-search-forward org-babel-src-block-regexp nil t))
+        (goto-char (match-beginning 0))
+        (if (> (point) search-bound)
+            (setq break t)
+          (when (equal info (+babel-get-src-info)) (org-babel-execute-src-block arg)))
+        (forward-line))))))
+
+(defun +babel/remove-session-results ()
+  "Remove results from every code block of the selected session, in buffer."
+  (interactive)
+  (org-babel-when-in-src-block
+   (let ((info (+babel-get-src-info)))
+     (org-with-wide-buffer
+      (goto-char (point-min))
+      (while (re-search-forward org-babel-src-block-regexp nil t)
+        (when (equal info (+babel-get-src-info))
+          (org-babel-remove-result)))))))
+#+END_SRC
+
+**** Helper functions
+***** Projects and subtasks identification
+#+BEGIN_SRC emacs-lisp
+(defun gas-org-has-subtasks-p ()
+  "Any heading with subtasks."
+  (org-with-wide-buffer
+   (let ((subtree-end (save-excursion (org-end-of-subtree t)))
+         has-subtasks)
+     (end-of-line)
+     (while (and (not has-subtasks) (re-search-forward org-todo-line-regexp subtree-end t))
+       (when (member (match-string 2) org-todo-keywords-1) (setq has-subtasks t)))
+     has-subtasks)))
+
+(defun +org-project-p ()
+  "Any task that has subtasks."
+  (and (org-get-todo-state) (gas-org-has-subtasks-p)))
+
+(defun +org-is-subtask (&optional first)
+  "Return t if this task is a subtask."
+  (let (return)
+    (org-with-wide-buffer
+     (org-back-to-heading 'invisible-ok)
+     (while (and (not return) (org-up-heading-safe))
+       (when (org-get-todo-state) (setq return t))))
+    return))
+#+END_SRC
+
+***** Tags
+#+BEGIN_SRC emacs-lisp
+ (setq org-tag-alist (quote (("@errand" . ?e)
+                            ("@bureau" . ?o)
+                            ("@maison" . ?h)
+                            ("@ferme"  . ?f)
+                            (:newline)
+                            ("ATTENTE"  . ?w)
+                            ("SUSPENDUE" . ?H)
+                            ("ANNULÉE"    . ?c)
+                            ("RÉUNION"   . ?m)
+                            ("TÉLÉPHONE" . ?p))))
+
+(defun gas|org-offer-all-agenda-tags ()
+  (setq-local org-complete-tags-always-offer-all-agenda-tags t))
+#+END_SRC
+
+**** End
+#+BEGIN_SRC emacs-lisp
+) ;; use-package
+
+(use-package org-element :commands org-element-update-syntax)
+#+END_SRC
+
+*** Agenda
+
+#+BEGIN_SRC emacs-lisp
+(use-package org-agenda
+  :config
+  (defun +agenda|check-sync-conflicts ()
+    (when (directory-files org-directory nil "sync-conflict")
+      (message-box "CONSEIL: Il y a des conflits de synchronisation!")))
+  (add-hook 'org-agenda-finalize-hook #'+agenda|check-sync-conflicts)
+
+  (general-def :keymaps 'org-agenda-mode-map "P" #'+agenda/toggle-private)
+
+  (gsetq
+   org-agenda-custom-commands
+   '(("n" "Ordre de jour"
+      ((agenda "" ((org-agenda-files (list org-default-notes-file gas-org-agenda-file))
+                   (org-agenda-span 4)))
+       (+agenda-inbox nil ((org-agenda-files (list org-default-notes-file))))
+       (+agenda-tasks))))
+
+   org-agenda-prefix-format '((agenda . "  %?-12t% s"))
+   org-agenda-skip-deadline-prewarning-if-scheduled 'pre-scheduled
+   org-agenda-tags-todo-honor-ignore-options t
+   org-agenda-todo-ignore-scheduled 'all
+   org-agenda-todo-ignore-deadlines 'far
+   org-agenda-skip-scheduled-if-done t
+   org-agenda-skip-deadline-if-done t
+   org-agenda-skip-scheduled-if-deadline-is-shown t
+   org-agenda-clockreport-parameter-plist `(:link t :maxlevel 6 :fileskip0 t :compact t :narrow 100)
+   org-agenda-columns-add-appointments-to-effort-sum t
+   org-agenda-dim-blocked-tasks nil
+   org-agenda-todo-list-sublevels nil
+   org-agenda-block-separator ""
+   org-agenda-time-grid '((daily today require-timed) nil "......" "----------------"))
+
+  (add-hook 'org-agenda-mode-hook 'gas|org-offer-all-agenda-tags)
+#+END_SRC
+**** Org-GTD
+#+BEGIN_SRC emacs-lisp
+
+(use-package org-gcal
+  :ensure t
+  ;;   :after '(auth-source-pass password-store)
+  :config
+  (setq org-gcal-client-id "887865341451-orrpnv3cu0fnh8hdtge77sv6csqilqtu.apps.googleusercontent.com"
+        org-gcal-client-secret "WmOGOCr_aWPJSqmwXHV-29bv"
+        org-gcal-file-alist
+        '(("agasson@ateasystems.com" . "~/org/gtd/calendars/atea-cal.org")
+          ("ateasystems.com_0ie21uc26j0a41g60b8f99mh1k@group.calendar.google.com" . "~/org/gtd/calendars/changecontrol-cal.org"))))
+
+;;(add-hook 'org-agenda-mode-hook (lambda () (org-gcal-sync) ))
+
+#+END_SRC
+**** Entry
+#+BEGIN_SRC emacs-lisp
+(cl-defstruct +agenda-entry todo priority text tags planned low-effort marker project-status children)
+
+(defun +agenda-entry (headline &optional tags)
+  (let ((todo-type (org-element-property :todo-type headline))
+        (effort (org-element-property :EFFORT headline)))
+    (make-+agenda-entry
+     :todo (org-element-property :todo-keyword headline)
+     :priority (org-element-property :priority headline)
+     :text (org-element-property :raw-value headline)
+     :tags (or tags (org-element-property :tags headline))
+     :low-effort (and effort (eq todo-type 'todo) (< (org-duration-to-minutes effort) 20))
+     :marker (org-agenda-new-marker (org-element-property :begin headline)))))
+#+END_SRC
+
+**** Renderer
+#+BEGIN_SRC emacs-lisp
+(defconst +agenda-projects-not-task-faces '(("PROCHAINE" . '(:inherit org-todo :weight normal))
+                                            ("TODO" . '(:inherit org-todo :weight normal))))
+
+(defconst +agenda-projects-task-faces '(("PROCHAINE" . '(:inherit org-todo :weight bold))
+                                        ("TODO" . '(:inherit org-todo :weight bold))))
+
+(defun +agenda-format-entry (prefix entry)
+  (let ((props (list 'gas-custom-agenda t
+                     'mouse-face 'highlight
+                     'undone-face nil
+                     'done-face 'org-agenda-done
+                     'org-marker (+agenda-entry-marker entry)
+                     'org-hd-marker (+agenda-entry-marker entry)
+                     'todo-state (+agenda-entry-todo entry)
+                     'org-todo-regexp org-todo-regexp
+                     'org-not-done-regexp org-not-done-regexp
+                     'org-complex-heading-regexp org-complex-heading-regexp
+                     'org-highest-priority org-highest-priority
+                     'org-lowest-priority org-lowest-priority
+	                 'tags (mapcar 'org-downcase-keep-props (+agenda-entry-tags entry))
+	                 'format `(() ,prefix)))
+        (text
+         (concat prefix
+                 (if (+agenda-entry-todo entry)
+                     (concat (+agenda-entry-todo entry) " ")
+                   "")
+                 (if (+agenda-entry-priority entry)
+                     (string ?\[ ?# (+agenda-entry-priority entry) ?\] ? )
+                   "")
+                 (+agenda-entry-text entry)
+                 (if (+agenda-entry-tags entry)
+                     (concat " :" (mapconcat #'identity (+agenda-entry-tags entry) ":") ":")
+                   ""))))
+
+	(add-text-properties (length prefix) (length text) '(org-heading t) text)
+    (setq text (concat (org-add-props text props) "\n"))
+    (org-agenda-highlight-todo text)))
+
+(defun +agenda-tip-for-effort (text low-effort &optional alt-text)
+  (if low-effort
+      (propertize text 'face '(:foreground "#b58900"))
+    (or alt-text text)))
+
+(defun +agenda-project-get-prefix (taskp parent-continuations &optional low-effort)
+  ;; IMPORTANT(gas): `parent-continuations' is in reverse order!
+  (let ((prefix "")
+        (tip t))
+    (if taskp
+        (dolist (cont parent-continuations)
+          (setq prefix (concat (if tip
+                                   (+agenda-tip-for-effort (if cont "├⮞ " "╰⮞ ") low-effort)
+                                 (if cont "│  " "   "))
+                        prefix)
+                tip nil))
+
+      (dolist (cont parent-continuations)
+        (setq prefix (concat (if tip (if cont "├─╴" "╰─╴") (if cont "│  " "   ")) prefix)
+              tip nil)))
+    (concat "  " prefix)))
+
+(defun +agenda-priority-sort (a b)
+  (let ((pa (or (+agenda-entry-priority a) ?B))
+        (pb (or (+agenda-entry-priority b) ?B)))
+    (< pa pb)))
+
+(defun +agenda-flatten-list (l)
+  (cond ((not l) nil)
+        ((atom l) (list l))
+        (t (append (+agenda-flatten-list (car l)) (+agenda-flatten-list (cdr l))))))
+
+(defun +agenda-project-printer (list &optional parent-continuations)
+  (setq list (sort list #'+agenda-priority-sort))
+
+  (if parent-continuations
+      (while list
+        (let ((entry (car list)))
+          (unless (cdr list) (setf (car parent-continuations) nil))
+
+          (when (eq (+agenda-entry-project-status entry) 'stuck)
+            (org-add-props (+agenda-entry-text entry) nil 'face 'org-priority))
+
+
+          (let ((org-todo-keyword-faces (if (+agenda-entry-project-status entry)
+                                            +agenda-projects-not-task-faces
+                                          +agenda-projects-task-faces)))
+            (insert
+             (+agenda-format-entry
+              (+agenda-project-get-prefix (not (+agenda-entry-project-status entry)) parent-continuations
+                                          (+agenda-entry-low-effort entry))
+              entry)))
+
+          (+agenda-project-printer (+agenda-entry-children entry) (cons t parent-continuations)))
+        (setq list (cdr list)))
+
+    (let ((first t)
+          (org-todo-keyword-faces +agenda-projects-not-task-faces))
+      (dolist (entry list)
+        (if first (setq first nil) (insert "\n"))
+
+        (when (eq (+agenda-entry-project-status entry) 'stuck)
+          (org-add-props (+agenda-entry-text entry) nil 'face 'org-priority))
+        (insert (+agenda-format-entry "  " entry))
+
+        (+agenda-project-printer (+agenda-entry-children entry) (list t))))))
+
+(defun +agenda-simple-printer (list)
+  (setq list (sort list #'+agenda-priority-sort))
+  (dolist (entry list)
+    (insert
+     (+agenda-format-entry (+agenda-tip-for-effort " ⮞" (+agenda-entry-low-effort entry) "  ") entry))))
+
+(defun +agenda-separator ()
+  (unless (or (bobp) org-agenda-compact-blocks
+			  (not org-agenda-block-separator))
+	(insert "\n"
+            (if (stringp org-agenda-block-separator)
+                org-agenda-block-separator
+			  (make-string (window-width) org-agenda-block-separator))
+		    "\n")))
+
+(defun +agenda-render-block (data title &optional printer)
+  (when data
+    (let ((begin (point)))
+      (+agenda-separator)
+      (insert (org-add-props title nil 'face 'org-agenda-structure) "\n")
+      (funcall (or printer #'+agenda-simple-printer) data)
+      (add-text-properties begin (point-max) `(org-agenda-type tags)))))
+#+END_SRC
+
+**** Inbox
+#+BEGIN_SRC emacs-lisp
+(defun +agenda-inbox-process-headline (headline)
+  (when (or +agenda-show-private
+            (not (member "PRIVATE" (org-element-property :tags headline))))
+    (+agenda-entry headline)))
+
+(defun +agenda-inbox (&optional _)
+  (catch 'exit
+    (let ((files (org-agenda-files nil 'ifmode))
+          +agenda-inbox
+          org-todo-regexp org-not-done-regexp org-complex-heading-regexp org-done-keywords
+          org-done-keywords-for-agenda file buffer ast)
+      (while (setq file (pop files))
+        (org-check-agenda-file file)
+        (setq buffer (if (file-exists-p file)
+                         (org-get-agenda-file-buffer file)
+                       (error "Ce fichier n'existe pas %s" file)))
+
+        (unless org-todo-regexp
+          (dolist (variable '(org-todo-regexp org-not-done-regexp org-complex-heading-regexp
+                                              org-done-keywords org-done-keywords-for-agenda))
+            (set variable (buffer-local-value variable buffer))))
+
+        (with-current-buffer buffer
+          (org-with-wide-buffer
+           (unless (derived-mode-p 'org-mode) (error "Fichier de Agenda %s ce n'est pas de Org mode" file))
+           (setq ast (org-element-parse-buffer 'headline))
+           (setq +agenda-inbox
+                 (append (org-element-map ast 'headline #'+agenda-inbox-process-headline nil nil 'headline)
+                         +agenda-inbox)))))
+
+      (let ((inhibit-read-only t))
+	    (goto-char (point-max))
+        (+agenda-render-block +agenda-inbox "Tâches Courante")))))
+#+END_SRC
+
+**** Tasks
+#+BEGIN_SRC emacs-lisp
+(defvar +agenda-level)
+(defvar +agenda-parent-tags)
+(defvar +agenda-project-status)
+(defvar +agenda-projects)
+(defvar +agenda-isolated-tasks)
+(defvar +agenda-high-priority)
+(defvar +agenda-low-priority)
+(defvar +agenda-archivable-tasks)
+(defvar +agenda-planned-tasks)
+(defvar +agenda-hold-tasks)
+
+(defun +agenda-filter-priorities (entry)
+  (let ((priority (+agenda-entry-priority entry)))
+    (cond ((eq priority ?A) (push entry +agenda-high-priority))
+          ((eq priority ?C) (push entry +agenda-low-priority)))))
+
+(defmacro +agenda-process-children (parent &optional task-children)
+  (if task-children
+      `(let ((+agenda-parent-tags (append (org-element-property :tags ,parent) +agenda-parent-tags))
+             (+agenda-level (1+ +agenda-level)))
+         (org-element-map (org-element-contents ,parent) 'headline
+           #'+agenda-tasks-process-headline nil nil 'headline))
+    `(let ((+agenda-parent-tags (append (org-element-property :tags ,parent) +agenda-parent-tags)))
+       (org-element-map (org-element-contents ,parent) 'headline #'+agenda-tasks-process-headline
+                        nil nil 'headline))))
+
+(defmacro +agenda-set-parent-minimum-status (status)
+  `(unless (= +agenda-level 0)
+     ,(if (symbolp status)
+          (cond ((eq status 'next)    '(setq +agenda-project-status 'next))
+                ((eq status 'planned) '(when (not (eq +agenda-project-status 'next))
+                                         (setq +agenda-project-status 'planned)))
+                (t '(unless +agenda-project-status (setq +agenda-project-status 'stuck))))
+        `(cond ((eq ,status 'next)     (setq +agenda-project-status 'next))
+               ((eq ,status 'planned)  (when (not (eq +agenda-project-status 'next))
+                                         (setq +agenda-project-status 'planned)))
+               (t (unless +agenda-project-status (setq +agenda-project-status 'stuck)))))))
+
+(defun +agenda-tasks-process-headline (headline)
+  (let* ((todo (org-element-property :todo-keyword headline))
+         (todo-type (org-element-property :todo-type headline))
+         (scheduled-ts (org-element-property :raw-value (org-element-property :scheduled headline)))
+         (deadline-ts  (org-element-property :raw-value (org-element-property :deadline headline)))
+         (closed-ts  (org-element-property :raw-value (org-element-property :closed headline)))
+         (has-scheduling (or scheduled-ts deadline-ts))
+         (scheduled-future (cond (scheduled-ts (> (org-time-stamp-to-now scheduled-ts) 0))
+                                 (deadline-ts  (> (org-time-stamp-to-now deadline-ts)
+                                                  (org-get-wdays deadline-ts)))))
+         (scheduled-past-or-now (and has-scheduling (not scheduled-future)))
+         (effort (org-element-property :EFFORT headline))
+         (contents-begin (org-element-property :contents-begin headline))
+         entry project-status return)
+
+    (setq entry (+agenda-entry headline (cl-remove-duplicates (append (org-element-property :tags headline)
+                                                                      +agenda-parent-tags)
+                                                              :test 'string=)))
+
+    (when (or +agenda-show-private
+              (not (member "PRIVATE" (org-element-property :tags headline))))
+      (if (not todo-type)
+          (unless (member "TICKLER" (org-element-property :tags headline))
+            (let* ((timestamp (or scheduled-ts deadline-ts))
+                   (time-to-now (and timestamp (org-time-stamp-to-now timestamp)))
+                   first-child search-bound temp-time)
+
+              ;; NOTE(gas): Find the most recent active timestamp
+              (when (and (not time-to-now) contents-begin)
+                (setq first-child (org-element-map (org-element-contents headline) 'headline #'identity
+                                                   nil t 'headline)
+                      search-bound (or (and first-child (org-element-property :begin first-child))
+                                       (org-element-property :end headline)))
+                (goto-char contents-begin)
+                (while (re-search-forward org-ts-regexp search-bound t)
+                  (setq temp-time (org-time-stamp-to-now (match-string 1)))
+                  (when (or (not time-to-now) (> temp-time time-to-now))
+                    (setq time-to-now temp-time))))
+
+              (if (and time-to-now (< time-to-now -60))
+                  ;; NOTE(gas): This headline without todo keyword has a timestamp that is
+                  ;; more than two months old.
+                  (push entry +agenda-archivable-tasks)
+
+                ;; NOTE(gas): Just process the children of this headline without todo keyword
+                (setq return (+agenda-process-children headline)))))
+
+        (+agenda-set-parent-minimum-status 'stuck)
+
+        (if (or (eq todo-type 'done)
+                (string= (org-element-property :STYLE headline) "habit"))
+            ;; NOTE(gas): Archive all tasks that have been done for longer than 2 months
+            (when (and (eq todo-type 'done)
+                       (or (not closed-ts)
+                           (< (org-time-stamp-to-now closed-ts) -60)))
+              (push entry +agenda-archivable-tasks))
+
+          (cond
+           ;; NOTE(gas): Planned
+           ((and (not (string= todo "PROCHAINE")) scheduled-future)
+            (setf (+agenda-entry-planned entry) t)
+            (if (= +agenda-level 0)
+                (push entry +agenda-planned-tasks)
+              (+agenda-set-parent-minimum-status 'planned)
+              (setq return entry)))
+
+           ;; NOTE(gas): Hold
+           ((or (string= todo "SUSPENDUE") (string= todo "ATTENTE"))
+            (push entry +agenda-hold-tasks))
+
+           (t
+            ;; NOTE(gas): Process children
+            (let* ((+agenda-project-status nil)
+                   (children (+agenda-flatten-list (+agenda-process-children headline t)))
+                   tail prev)
+              (setq project-status +agenda-project-status)
+
+              ;; NOTE(gas): When this project is not planned, we need to remove its
+              ;; planned tasks and insert them in the planned list
+              ;; IMPORTANT(gas): A project that is stuck doesn't have any planned children
+              ;; so, for this check, not planned ≡ next
+              (when (eq project-status 'next)
+                (setq tail children)
+                (while tail
+                  (if (or (+agenda-entry-planned (car tail))
+                          (eq (+agenda-entry-project-status (car tail)) 'planned))
+                      (progn
+                        (push (car tail) +agenda-planned-tasks)
+                        (if prev
+                            (setcdr prev (cdr tail))
+                          (setq children (cdr tail))))
+                    (setq prev tail))
+                  (setq tail (cdr tail))))
+
+              (setf (+agenda-entry-project-status entry) project-status
+                    (+agenda-entry-children entry) children))
+
+            ;; NOTE(gas): Update parent project status
+            (unless (or (= +agenda-level 0) (eq +agenda-project-status 'next))
+              (if project-status
+                  (when (memq project-status '(next planned)) (setq +agenda-project-status project-status))
+                (when (or (string= todo "PROCHAINE") scheduled-past-or-now)
+                  (setq +agenda-project-status 'next))))
+
+            (if project-status
+                (if (and (eq project-status 'planned) (= +agenda-level 0))
+                    (push entry +agenda-planned-tasks)
+                  (setq return entry))
+
+              (if (= +agenda-level 0)
+                  (unless (+agenda-filter-priorities entry)
+                    (when (or (not has-scheduling) (and (string= todo "PROCHAINE")
+                                                        scheduled-future))
+                      (push entry +agenda-isolated-tasks)))
+
+                (when (or (string= todo "PROCHAINE") scheduled-past-or-now) (setq return entry))))))))
+      return)))
+
+(defun +agenda-tasks (&optional _)
+  (catch 'exit
+    (let ((files (org-agenda-files nil 'ifmode))
+          +agenda-projects +agenda-isolated-tasks +agenda-high-priority
+          +agenda-low-priority +agenda-planned-tasks +agenda-hold-tasks
+          +agenda-archivable-tasks
+          org-todo-regexp org-not-done-regexp org-complex-heading-regexp org-done-keywords
+          org-done-keywords-for-agenda file buffer ast)
+      (while (setq file (pop files))
+        (org-check-agenda-file file)
+        (setq buffer (if (file-exists-p file)
+                         (org-get-agenda-file-buffer file)
+                       (error "Ce fichier n'existe pas %s" file)))
+
+        (unless org-todo-regexp
+          (dolist (variable '(org-todo-regexp org-not-done-regexp org-complex-heading-regexp
+                                              org-done-keywords org-done-keywords-for-agenda))
+            (set variable (buffer-local-value variable buffer))))
+
+        (with-current-buffer buffer
+          (org-with-wide-buffer
+           (unless (derived-mode-p 'org-mode) (error "Fichier de Agenda  %s ce n'est pas de Org mode" file))
+           (setq ast (org-element-parse-buffer 'headline))
+           (let ((+agenda-level 0)
+                 +agenda-parent-tags)y
+             (setq +agenda-projects
+                   (append
+                    (+agenda-flatten-list
+                     (org-element-map ast 'headline #'+agenda-tasks-process-headline nil nil 'headline))
+                           +agenda-projects))))))
+
+      (let ((inhibit-read-only t))
+	    (goto-char (point-max))
+            (+agenda-render-block (nreverse +agenda-high-priority)    "Tâches hautement importante")
+        (+agenda-render-block +agenda-projects                    "Projets" #'+agenda-project-printer)
+        (+agenda-render-block (nreverse +agenda-isolated-tasks)   "Tâches isolées")
+        (+agenda-render-block (nreverse +agenda-low-priority)     "Tâches à faible priorité")
+        (+agenda-render-block (nreverse +agenda-archivable-tasks) "Tâches à archiver")
+        (+agenda-render-block (nreverse +agenda-planned-tasks)    "Tâches prévues")
+        (+agenda-render-block (nreverse +agenda-hold-tasks)       "Tâches en attente")))))
+#+END_SRC
+
+**** Private information
+#+BEGIN_SRC emacs-lisp
+(defvar +agenda-show-private t
+  "If non-nil, show sensitive information on the agenda.")
+
+(defun +agenda/toggle-private ()
+  (interactive)
+  (setq +agenda-show-private (not +agenda-show-private))
+  (when  (equal major-mode 'org-agenda-mode) (org-agenda-redo))
+  (message "Tâches privées: %s" (if +agenda-show-private "Shown" "Hidden")))
+#+END_SRC
+
+**** Compatibility with their functions
+#+BEGIN_SRC emacs-lisp
+(defun +agenda*change-all-lines-fixface (newhead hdmarker &optional fixface just-this)
+  (when (org-get-at-bol 'gas-custom-agenda)
+    (let ((inhibit-read-only t))
+	  (add-text-properties (point-at-bol) (point-at-eol) '(face nil)))))
+(advice-add 'org-agenda-change-all-lines :before '+agenda*change-all-lines-fixface)
+#+END_SRC
+
+**** End
+#+BEGIN_SRC emacs-lisp
+) ;; use-package
+#+END_SRC
+
+*** Attach
+#+BEGIN_SRC emacs-lisp
+(use-package org-attach
+  :config
+  (gsetq org-attach-directory "Ressources/attacher/"
+         org-attach-method 'mv))
+#+END_SRC
+
+*** Capture
+#+BEGIN_SRC emacs-lisp
+(use-package org-capture
+  :init
+  (defun gas-org-capture-frame ()
+    (modify-frame-parameters nil '((name . "Org Capture")
+                                   (org-capture-frame . t)
+                                   (width . 110) (height . 40)))
+    (org-capture))
+
+  :config
+  (defun gas-org-capture-add-created-property ()
+    (org-set-property "CREATED" (format-time-string
+                                 (concat "[" (substring (cdr org-time-stamp-formats) 1 -1) "]"))))
+  (add-hook 'org-capture-before-finalize-hook 'gas-org-capture-add-created-property)
+
+  (gsetq
+   org-capture-templates '(
+			   ("t" "T" entry (file "")
+                            "* PROCHAINE %i%?" :clock-in t :clock-resume t)
+			   ("r" "respond" entry (file "~/org/gtd/inbox.org")
+			    "* PROCHAINE Respond to %:from on %:subject :@bureau:\nSCHEDULED: %t\n%U\n%a\n" :clock-in t :clock-resume t :immediate-finish t)
+			   ("c" "Calendrier" entry (file "")
+                            "* %?\n%^t")
+			   ("n" "Remarque" entry (file "")
+                            "* %?" :clock-in t :clock-resume t)
+                     ("j" "Journal" entry (file+olp+datetree gas-org-journal-file)
+                     ("m" "Meeting" entry (file "~/org/gtd/calendars/atea-cal.org")
+  		      "* RÉUNION with %? :RÉUNION:@bureau:\n%U" :clock-in t :clock-resume t)
+		           ("p" "Phone call" entry (file+headline "~/org/gtd/atea.org" "Interruptions")
+			    "* TÉLÉPHONE %? :TÉLÉPHONE:@bureau:\n%U" :clock-in t :clock-resume t)
+			   ("h" "Habit🙈" entry (file "~/org/gtd/atea.org")
+			    "* TODO %?\n%U\n%a\nSCHEDULED: %(format-time-string \"%<<%Y-%m-%d %a .+1d/3d>>\")\n:PROPERTIES:\n:STYLE: habit\n:REPEAT_TO_STATE: PROCHAINE\n:END:\n")
+                     ("w" "Web bookmark" entry (file "")
+                      "* [[%:link][%^{Title|%:description}]]\n%?" :clock-in t :clock-resume t))
+		     ))
+
+  (add-hook 'org-capture-mode-hook 'gas|org-offer-all-agenda-tags)
+
+  ;; NOTE(gas): Handle capture frame
+  (advice-add
+   'org-switch-to-buffer-other-window :after
+   (lambda (&rest _) (when (frame-parameter nil 'org-capture-frame) (delete-other-windows))))
+  (advice-add
+   'org-capture :around
+   (lambda (capture-function &rest args)
+     (condition-case nil (apply capture-function args)
+       (error (when (frame-parameter nil 'org-capture-frame)
+                (delete-frame))))))
+  (add-hook
+   'org-capture-after-finalize-hook
+   (lambda (&rest _)
+     (when (and (frame-parameter nil 'org-capture-frame) (not org-capture-is-refiling))
+       (org-save-all-org-buffers)
+       (delete-frame))))
+  (advice-add
+   'org-capture-refile :after
+   (lambda (&rest _)
+     (when (frame-parameter nil 'org-capture-frame)
+       (org-save-all-org-buffers)
+       (delete-frame))))
+)
+#+END_SRC
+
+*** Clocking
+#+BEGIN_SRC emacs-lisp
+(use-package org-clock
+  :config
+  (gsetq org-clock-in-resume t
+         org-clock-out-remove-zero-time-clocks t
+         org-clock-report-include-clocking-task t
+         org-clock-persist t
+         org-clock-persist-file (concat gas-etc-dir "org-clock-save.el")
+         org-clock-history-length 25)
+  (org-clock-persistence-insinuate))
+#+END_SRC
+
+*** Habit
+#+BEGIN_SRC emacs-lisp
+(use-package org-habit
+  :config
+  (gsetq org-habit-graph-column 75
+         org-habit-preceding-days 30
+         org-habit-following-days 1
+         org-habit-today-glyph ?@))
+#+END_SRC
+
+*** IDs
+#+BEGIN_SRC emacs-lisp
+(use-package org-id
+  :config
+  (gsetq org-id-link-to-org-use-id 'create-if-interactive
+         org-id-locations-file (concat gas-cache-dir "org-id-locations")))
+#+END_SRC
+
+*** Org Noter
+#+BEGIN_SRC emacs-lisp
+(use-package org-noter :ensure
+  :general
+  (gas-local-leader :keymaps 'org-mode-map
+    "n" '(org-noter :wk "Org Noter"))
+
+  :config
+  (gsetq org-noter-default-heading-title "Notes de page $p$"
+         org-noter-default-notes-file-names '("notes.org" "Notes.org")
+         org-noter-hide-other t))
+#+END_SRC
+
+*** Source blocks
+#+BEGIN_SRC emacs-lisp
+(use-package org-src
+  :custom
+  (org-src-fontify-natively t)
+  (org-src-tab-acts-natively t)
+  (org-edit-src-content-indentation 0)
+  :config
+  (add-to-list 'org-src-lang-modes '("html" . web)))
+#+END_SRC
+
+** Tools and utilities
+*** Compilation
+#+BEGIN_SRC emacs-lisp
+(use-package compile
+  :general
+  (gas-leader "c" '(+compile :wk "Compile"))
+  ("M-g n" '(gas@error/next-error :wk "Next error")
+   "M-g p" '(gas@error/previous-error :wk "Previous error"))
+
+  :config
+  (defhydra gas@error ()
+    "Errors"
+    ("f" first-error "First")
+    ("n" next-error "Next")
+    ("p" previous-error "Previous")
+    ("c" +compile "Recompile")
+    ("q" nil "Quit"))
+
+  (gsetq
+   compilation-ask-about-save nil
+   compilation-always-kill t
+   compilation-scroll-output 'first-error
+   compilation-context-lines 2
+   compilation-environment '("TERM=xterm"))
+
+  (cl-defstruct +compile-info type path last-args last-time buffer-name should-close)
+  (defvar-local +compile-info nil)
+  (defvar +compile-info-table (make-hash-table :test 'equal))
+
+  (defconst +compile-sh-names (if (eq system-type 'windows-nt)
+                                  '("build-gas.bat" "build.bat")
+                                '("build-gas.sh" "build.sh")))
+  (defconst +compile-makefile-names '("makefile" "Makefile"))
+  (defconst +compile-script-names (append +compile-sh-names +compile-makefile-names))
+
+  (defun +compile-buffer-name (arg)
+    ;; NOTE(gas): This serves  2 purposes: one is creating the  buffer name itself, called
+    ;; from gas/compile  with arg  = info;  the other  is returning  the buffer  name when
+    ;; called  from compilation-start,  which  is  returned from  the  local  info in  the
+    ;; compilation buffer.
+    (if +compile-info (+compile-info-buffer-name +compile-info)
+      (let ((project-name (projectile-project-name)))
+        (if project-name
+            (format "*[%s] - Compile %s*" project-name (file-name-nondirectory (+compile-info-path arg)))
+          (format "*Compile %s*" (+compile-info-path arg))))))
+
+  (defun +compile (arg)
+    (interactive "P")
+    (let ((default-script (when +compile-info (cons (+compile-info-path +compile-info)
+                                                    +compile-info)))
+          (start-file-name (or (buffer-file-name) ""))
+          script script-list buffer)
+      (dolist (test-script +compile-script-names (setq script-list (nreverse script-list)))
+        (let ((found-script-dir (locate-dominating-file default-directory test-script))
+              full-path info)
+          (when found-script-dir
+            (setq full-path (expand-file-name test-script found-script-dir)
+                  info
+                  (or
+                   (gethash full-path +compile-info-table)
+                   (make-+compile-info :type (if (member test-script +compile-makefile-names) 'make 'sh)
+                                       :path full-path
+                                       :last-time '(0 0 0 0))))
+
+            (push (cons (+compile-info-path info) info) script-list)
+            (when (and (not +compile-info)
+                       (or (not default-script) (time-less-p (+compile-info-last-time (cdr default-script))
+                                                             (+compile-info-last-time info))))
+              (setq default-script (car script-list))))))
+
+      (if (not script-list)
+          (error "No build script found")
+        (if (or (not arg) (= (length script-list) 1))
+            (setq script (cdr default-script))
+          (setq script (cdr (assoc
+                             (completing-read "Which build script? "
+                                              script-list nil t nil nil (car default-script))
+                             script-list))))
+
+        (setf (+compile-info-buffer-name script) (+compile-buffer-name script))
+        (setq buffer (get-buffer-create (+compile-info-buffer-name script)))
+
+        (if (projectile-project-p) (projectile-save-project-buffers) (save-some-buffers t))
+
+        (if (= (length (window-list)) 1)
+            (setf (+compile-info-should-close script) t)
+          (unless (get-buffer-window buffer) (setf (+compile-info-should-close script) nil)))
+
+        (with-current-buffer buffer
+          (cd (file-name-directory (+compile-info-path script)))
+          (let (command command-args)
+            (if (eq (+compile-info-type script) 'make)
+                (setq command "make"
+                      command-args (or (+compile-info-last-args script) "-k"))
+
+              (setq command (shell-quote-argument
+                             (concat "./" (file-name-nondirectory (+compile-info-path script))))
+                    command-args (or (+compile-info-last-args script) "%f")))
+
+            (when arg (setq command-args (read-string "Arguments: " command-args)))
+
+            (setf (+compile-info-last-args script) command-args)
+            (setq command-args (replace-regexp-in-string
+                                (regexp-quote "%f") (shell-quote-argument start-file-name) command-args))
+
+            (setq +compile-info script)
+
+            (setf (+compile-info-last-time script) (current-time))
+            (compilation-start (concat command " " command-args) nil '+compile-buffer-name)
+            ;; NOTE(gas): Need to set it again in order to persist after changing the
+            ;; major mode
+            (setq +compile-info script)))
+
+        (puthash (+compile-info-path script) script +compile-info-table))))
+
+  (defun +compile|bury-buffer (buffer string)
+    "Bury compilation buffer if it succeeded."
+    (with-current-buffer buffer
+      (when +compile-info
+        (message "Compilation time: %.3fs"
+                 (float-time (time-subtract (current-time) (+compile-info-last-time +compile-info))))
+        (when (and (string= string "finished\n")
+                   (save-excursion (not (ignore-errors (compilation-next-error 1 nil 1)))))
+          (let ((windows (get-buffer-window-list buffer t)))
+            (dolist (window windows)
+              (if (and (> (length (window-list (window-frame window))) 1)
+                       (+compile-info-should-close +compile-info))
+                  (delete-window window)
+                (switch-to-prev-buffer window))))
+          (bury-buffer buffer)))))
+  (add-hook 'compilation-finish-functions '+compile|bury-buffer)
+
+  (defun +compile|ansi-color-apply ()
+    "Applies ansi codes to the compilation buffers. Meant for `compilation-filter-hook'."
+    (with-silent-modifications
+      (ansi-color-apply-on-region compilation-filter-start (point))))
+  (add-hook! 'compilation-filter-hook #'+compile|ansi-color-apply))
+#+END_SRC
+
+*** Dired
+**** Base and utility functions
+#+BEGIN_SRC emacs-lisp
+(use-package dired
+  :config
+  (after! dired+ ;; This overrides the keys, so only after loading
+    (general-def :keymaps 'dired-mode-map
+      "e" #'gas/ediff-files))
+
+  (gsetq dired-auto-revert-buffer t
+         dired-dwim-target t
+         dired-hide-details-hide-symlink-targets nil
+         dired-listing-switches "-alh"
+         dired-recursive-copies 'always
+         dired-recursive-deletes 'always
+         image-dired-dir (concat gas-cache-dir "image-dired/")
+         image-dired-db-file (concat image-dired-dir "db.el")
+         image-dired-gallery-dir (concat image-dired-dir "gallery/")
+         image-dired-temp-image-file (concat image-dired-dir "temp-image")
+         image-dired-temp-rotate-image-file (concat image-dired-dir "temp-rotate-image"))
+
+  (defun dired|create-non-existent-directory ()
+    "Create missing directories when creating new files."
+    (let ((parent-directory (file-name-directory buffer-file-name)))
+      (when (and (not (file-exists-p parent-directory))
+                 (y-or-n-p (format "Directory `%s' does not exist! Create it?" parent-directory)))
+        (make-directory parent-directory t))))
+  (push #'dired|create-non-existent-directory find-file-not-found-functions)
+#+END_SRC
+
+***** PDF compressor and merger
+#+BEGIN_SRC emacs-lisp
+(defun gas-pdf-compress-merge-sentinel (process event)
+  (unless (process-live-p process)
+    (let ((exit-code (process-exit-status process)))
+      (if (/= exit-code 0)
+          (error "Something went wrong with the process! Exit code: %d" exit-code)
+        (let* ((data (process-get process 'data))
+               (output (car data))
+               (temp-output-name (car output))
+               (output-name (cdr output))
+               (files (cdr data)))
+          (dolist (file files)
+            (move-file-to-trash file))
+          (ignore-errors (rename-file temp-output-name output-name 1))
+          (message "Done compressing/merging PDF(s)."))))))
+
+(defun gas/pdf-compress-merge (arg)
+  (interactive "P")
+  (let ((files (dired-get-marked-files))
+        (quality "ebook")
+        (color-conv-strat "UseDeviceIndependentColor")
+        (temp-output-name (format "MERGED_FILE_%d.pdf" (random 100000)))
+        output-name)
+    (if (< (length files) 1)
+        (user-error "You must select at least one file!")
+      (when arg
+        (setq quality (completing-read
+                       "Compression type: "
+                       '("default" "screen" "ebook" "printer" "prepress")
+                       nil t nil nil quality)
+              color-conv-strat (completing-read
+                                "Color conversion strategy: "
+                                '("LeaveColorUnchanged" "Gray" "RGB" "sRGB" "CMYK" "UseDeviceIndependentColor")
+                                nil t nil nil color-conv-strat)))
+      (setq output-name (completing-read "Output name: "
+                                         (when (= (length files) 1)
+                                           files)))
+      (when (= (length output-name) 0) (setq output-name "Output.pdf"))
+      (process-put (make-process
+                    :name "PDF Compressor/Merger"
+                    :buffer "*PDF Compress*"
+                    :connection-type 'pipe
+                    :sentinel 'gas-pdf-compress-merge-sentinel
+                    :command
+                    (append
+                     (list "gs" "-dBATCH" "-dNOPAUSE" "-q" "-sDEVICE=pdfwrite"
+                           (concat "-sColorConversionStrategy=/" color-conv-strat)
+                           (concat "-sOutputFile=" temp-output-name)
+                           (concat "-dPDFSETTINGS=/" quality))
+                     files))
+                   'data (cons (cons temp-output-name output-name)  files)))))
+#+END_SRC
+
+***** Whiteboard image creator
+#+BEGIN_SRC emacs-lisp
+(defun gas/whiteboard ()
+  (interactive)
+  (unless (executable-find "whiteboard") (error "No whiteboard script :("))
+  (let ((window-config (current-window-configuration))
+        (files (dired-get-marked-files)))
+    (dolist (file files)
+      (let ((result-name (file-name-sans-extension file))
+            (pos (make-vector 4 nil))
+            (command-arguments "whiteboard"))
+        (find-file file)
+        (if (not (eq major-mode 'image-mode))
+            (message "%s is not an image!" file)
+
+          (let* ((displayed-image (image-get-display-property))
+                 (original-image (image--image-without-parameters displayed-image))
+                 (factor (/ (float (car (image-size original-image t)))
+                            (float (car (image-size displayed-image t)))))
+                 (index 0)
+                 event)
+            (plist-put (cdr (image-get-display-property)) :pointer 'arrow)
+
+            (while (and (not (eq event 'return)) (not (aref pos 3)))
+              (delete-other-windows)
+              (setq event (read-event "Next corner..."))
+              (when (and (listp event) (eq 'mouse-1 (car event))
+                         (eq (selected-window) (posn-window (event-start event))))
+                (setf (aref pos index) (cons (* (car (posn-x-y (event-start event))) factor)
+                                             (* (cdr (posn-x-y (event-start event))) factor)))
+                (setq index (1+ index)))))
+
+          (when (aref pos 3)
+            (setq command-arguments
+                  (concat command-arguments " -c \""
+                          (mapconcat (lambda (x) (format "%d,%d" (car x) (cdr x)))
+                                     pos " ")
+                          "\"")))
+
+          (setq command-arguments (concat command-arguments " " (read-string "Extra arguments: ") " "
+                                          (shell-quote-argument file) " " (shell-quote-argument result-name)
+                                          "-whiteboard.png"))
+
+          (async-shell-command command-arguments))))
+    (set-window-configuration window-config)
+    (dired-unmark-all-marks)))
+#+END_SRC
+
+***** Diff two files
+#+BEGIN_SRC emacs-lisp
+(defun gas/ediff-files ()
+  (interactive)
+  (let ((files (dired-get-marked-files))
+        (wnd (current-window-configuration)))
+    (if (<= (length files) 2)
+        (let ((file1 (car files))
+              (file2 (if (cdr files)
+                         (cadr files)
+                       (read-file-name
+                        "file: "
+                        (dired-dwim-target-directory)))))
+          (if (file-newer-than-file-p file1 file2)
+              (ediff-files file2 file1)
+            (ediff-files file1 file2))
+          (add-hook 'ediff-after-quit-hook-internal
+                    (lambda ()
+                      (setq ediff-after-quit-hook-internal nil)
+                      (set-window-configuration wnd))))
+      (error "no more than 2 files should be marked"))))
+#+END_SRC
+
+***** Rsync
+#+BEGIN_SRC emacs-lisp
+(defun gas/dired-rsync (dest)
+  (interactive
+   (list
+    (expand-file-name
+     (read-file-name
+      "Rsync to:"
+      (dired-dwim-target-directory)))))
+  (let ((files (dired-get-marked-files
+                nil current-prefix-arg))
+        (rsync-command
+         "rsync -arvz --progress "))
+    (dolist (file files)
+      (setq rsync-command
+            (concat rsync-command
+                    (shell-quote-argument file)
+                    " ")))
+    (setq rsync-command
+          (concat rsync-command
+                  (shell-quote-argument dest)))
+    (async-shell-command rsync-command "*rsync*")
+    (other-window 1)))
+#+END_SRC
+
+***** End
+#+BEGIN_SRC emacs-lisp
+) ;; (use-package dired)
+#+END_SRC
+
+**** Diredfl and Dired+
+#+BEGIN_SRC emacs-lisp
+(use-package diredfl :ensure
+  :after-call (dired-mode-hook)
+  :config (diredfl-global-mode))
+
+(use-package dired+ :quelpa (dired+ :fetcher wiki)
+  :after-call (dired-mode-hook))
+#+END_SRC
+
+*** Deft
+#+BEGIN_SRC emacs-lisp
+(use-package deft :ensure
+ ;; :general (gas-leader "d" '(deft :wk "Deft"))
+  :config
+  (gsetq deft-directory "~/Dropbox/GTD/Deft/"
+         deft-extensions '("org" "txt" "md" "markdown")
+         deft-default-extension (car deft-extensions)
+         deft-use-filename-as-title nil
+         deft-use-filter-string-for-filename t
+         deft-file-naming-rules '((noslash . "-")
+                                   (nospace . "-")
+                                   (case-fn . downcase))
+         deft-auto-save-interval 0
+         deft-org-mode-title-prefix t))
+#+END_SRC
+
+*** Document viewers
+**** Nov.el
+#+BEGIN_SRC emacs-lisp
+(use-package nov :ensure
+  :mode (("\\.epub\\'" . nov-mode)))
+#+END_SRC
+
+*** Ediff
+#+BEGIN_SRC emacs-lisp
+(use-package ediff
+  :custom
+  (ediff-split-window-function #'split-window-horizontally)
+  (ediff-window-setup-function #'ediff-setup-windows-plain)
+  (ediff-diff-options "-w")
+
+  :config
+  (add-hook! 'ediff-prepare-buffer-hook (when (derived-mode-p 'outline-mode) (outline-show-all)))
+  (defvar ediff--saved-wconf nil)
+  (defun ediff|save-wconf ()
+    (setq ediff--saved-wconf (current-window-configuration)))
+  (defun ediff|restore-wconf ()
+    (set-window-configuration ediff--saved-wconf))
+  (add-hook 'ediff-before-setup-hook #'ediff|save-wconf)
+  (add-hook! '(ediff-quit-hook ediff-suspend-hook) #'ediff|restore-wconf 'append))
+#+END_SRC
+
+*** Git
+#+BEGIN_SRC emacs-lisp
+(use-package magit :ensure
+  :when (executable-find "git")
+  :custom
+  (magit-completing-read-function #'ivy-completing-read)
+  (magit-diff-refine-hunk 'all))
+#+END_SRC
+
+*** Misc
+**** Apropos
+#+BEGIN_SRC emacs-lisp
+(use-package apropos
+  :custom
+  (apropos-do-all t))
+#+END_SRC
+
+**** Calendar and holidays
+#+BEGIN_SRC emacs-lisp
+(use-package calendar
+  :custom
+  (calendar-week-start-day 1)
+  (calendar-location-name "Porto")
+  (calendar-latitude  41.1579)
+  (calendar-longitude -8.6291)
+  :config (gsetq calendar-date-display-form calendar-european-date-display-form))
+
+(use-package holidays
+  :custom
+  (calendar-holidays
+   '((holiday-fixed  1  1    "New Year's Day")
+     (holiday-easter-etc -47 "Carnival")
+     (holiday-easter-etc  -2 "Good Friday")
+     (holiday-easter-etc   0 "Easter")
+     (holiday-fixed  4 25    "Freedom Day")
+     (holiday-fixed  5  1    "Labour Day")
+     (holiday-easter-etc  60 "Corpus Christi")
+     (holiday-fixed  6 10    "Portugal Day")
+     (holiday-fixed  8 15    "Assumption")
+     (holiday-fixed 10  5    "Republic Day")
+     (holiday-fixed 11  1    "All Saints Day")
+     (holiday-fixed 12  1    "Restoration of Independence")
+     (holiday-fixed 12  8    "Immaculate Conception")
+     (holiday-fixed 12 25    "Christmas"))))
+#+END_SRC
+
+**** Help
+#+BEGIN_SRC emacs-lisp
+(use-package help
+  :custom
+  (help-window-select t))
+#+END_SRC
+
+**** Spelling
+#+BEGIN_SRC emacs-lisp
+(use-package ispell
+  :when (executable-find "hunspell")
+  :custom
+  (ispell-program-name "hunspell")
+  (ispell-really-hunspell t))
+#+END_SRC
+
+**** Uniquify
+#+BEGIN_SRC emacs-lisp
+(use-package uniquify
+  :custom
+  (uniquify-buffer-name-style 'forward)
+  (uniquify-separator "/")
+  (uniquify-after-kill-buffer-p t))
+#+END_SRC
+
+**** Time
+#+BEGIN_SRC emacs-lisp
+(use-package time
+  :custom
+  (display-time-24hr-format t)
+  (display-time-load-average-threshold 1.5))
+#+END_SRC
+
+*** Tramp
+#+BEGIN_SRC emacs-lisp
+(use-package tramp
+  :custom
+  (tramp-default-method "ssh")
+  (tramp-backup-directory-alist '(("." . "/tmp/tramp-backup-files/")))
+  (tramp-auto-save-directory   (concat gas-cache-dir "tramp-auto-save/"))
+  (tramp-persistency-file-name (concat gas-cache-dir "tramp-persistency.el"))
+  (tramp-default-proxies-alist '(((regexp-quote (system-name)) nil nil)
+                                 (nil "\\`root\\'" "/ssh:%h:"))))
+#+END_SRC
+
+*** Treemacs
+#+BEGIN_SRC emacs-lisp
+(use-package treemacs :ensure
+  :init
+  (gsetq treemacs-persist-file (concat gas-cache-dir "treemacs-persist")))
+#+END_SRC
+
+** Keybindings
+*** Global keybindings
+#+BEGIN_SRC emacs-lisp
+(general-def
+  "<C-return>"   #'gas/open-line-below
+  "<C-M-return>" #'gas/open-line-above
+  "<backtab>"    #'indent-for-tab-command
+  "<C-tab>"     #'indent-region
+  "M-o"         #'other-window
+  "M-O"        (λ! (other-window -1))
+  "C-x C-q" #'gas/exit-emacs)
+
+(gas-leader
+  :infix "f"
+  ""  '(:ignore t :wk "Files")
+  "f" '(find-file :wk "Open")
+  "s" '(save-buffer :wk "Save")
+  "r" '(gas/rename-file-and-buffer :wk "Rename current")
+  "k" '(gas/delete-file-and-buffer :wk "Delete current")
+  "o" '(ff-find-other-file :wk "Switch header/source")
+  "b" '(hexl-find-file :wk "Open binary")
+  "l" '(find-file-literally :wk "Open literally"))
+#+END_SRC
+
+*** Which-key
+
+#+BEGIN_SRC emacs-lisp
+(use-package which-key :ensure
+  :defer 1
+  :after-call pre-command-hook
+  :config
+  (gsetq which-key-sort-order #'which-key-prefix-then-key-order
+         which-key-sort-uppercase-first nil
+         which-key-add-column-padding 1
+         which-key-max-display-columns nil
+         which-key-min-display-lines 6
+         which-key-side-window-slot -10)
+  (which-key-mode))
+#+END_SRC
