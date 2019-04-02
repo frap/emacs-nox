@@ -501,8 +501,8 @@ called. The buffer to be switched to is current when these hooks run.")
               package-gnupghome-dir gas-packages-dir
               package-archives
               '(("gnu"   . "https://elpa.gnu.org/packages/")
-		      ("melpa-stable" . "https://stable.melpa.org/packages/")
-               ;; ("melpa" . "https://melpa.org/packages/")
+		          ("melpa-stable" . "https://stable.melpa.org/packages/")
+                ("melpa" . "https://melpa.org/packages/")
                 ("org"   . "https://orgmode.org/elpa/")))
 
 (unless (bound-and-true-p gnutls-verify-error)
@@ -1427,7 +1427,7 @@ Needed for ivy fuzzy matching.
 ^^^^       Find               ^^   Search/Tags       ^^^^       Buffers               ^^   Cache                     ^^^^       Other
 ^^^^--------------------------^^---------------------^^^^-----------------------------^^------------------------------------------------------------------
 _f_/_s-f_: file               _a_: ag                ^^    _i_: Ibuffer               _c_: cache clear               ^^    _E_: edit project's .dir-locals.el
-^^    _F_: file dwim          _G_: update gtags      ^^    _b_: switch to buffer      _x_: remove known project      _s-p_/_p_: switch to other project
+^^    _F_: file dwim          ^^                     ^^    _b_: switch to buffer      _x_: remove known project      _s-p_/_p_: switch to other project
 ^^    _d_: file curr dir      _o_: multi-occur       _K_/_s-k_: kill all buffers      _X_: cleanup non-existing      ^^    _g_: switch to Magit status of other project
 ^^    _l_: file literally     ^^                     ^^^^                             _z_: cache current             ^^    _P_: switch to an open project
 ^^    _r_: recent file        ^^                     ^^^^                             ^^                             ^^    _D_: find dir
@@ -1441,12 +1441,12 @@ _f_/_s-f_: file               _a_: ag                ^^    _i_: Ibuffer         
       ("F"   projectile-find-file-dwim)
       ("D"   projectile-find-dir)
       ("E"   projectile-edit-dir-locals)
-  ;    ("g"   modi/projectile-switch-project-magit-status)
+      ("g"   projectile-switch-project-magit-status)
    ;   ("G"   ggtags-update-tags)
       ("i"   projectile-ibuffer)
       ("K"   projectile-kill-buffers)
       ("s-k" projectile-kill-buffers)
-   ;   ("l"   modi/projectile-find-file-literally)
+      ("l"   projectile-find-file-literally)
       ("m"   projectile-multi-occur)
       ("o"   projectile-multi-occur)
       ("p"   projectile-switch-project)
