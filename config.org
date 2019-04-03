@@ -1349,7 +1349,7 @@ Needed for ivy fuzzy matching.
          company-transformers '(company-sort-by-occurrence))
 
   (setq-hook! prog-mode
-    company-backends '((:separate company-dabbrev-code company-capf company-yasnippet company-go)))
+    company-backends '((:separate company-dabbrev-code company-capf company-yasnippet)))
 
   (setq-hook! text-mode
     company-backends '((:separate company-dabbrev company-capf company-yasnippet)))
@@ -1730,16 +1730,14 @@ Lisp function does not specify a special indentation."
   (add-hook! :append :local clojure-mode '(yas-minor-mode subword-mode global-prettify-symbols-mode))
 ;;  (add-hook! :local clojure-mode 'subword-mode)
 ;;  (add-hook! :local clojure-mode 'global-prettify-symbols-mode)
-  (defun figwheel-repl ()
-   (interactive)
-   (inf-clojure "clojure -Afig"))
 )
 
 (use-package cider
   :defer
   :init
   (setq cider-auto-select-error-buffer t
-        cider-repl-pop-to-buffer-on-connect nil
+     ;;   cider-repl-prompt-function cider-repl-prompt-abbreviated
+        cider-repl-pop-to-buffer-on-connect 'display-only
         cider-repl-use-clojure-font-lock t
         cider-repl-wrap-history t
         cider-repl-history-size 1000
@@ -1759,6 +1757,8 @@ Lisp function does not specify a special indentation."
   ;; (add-hook 'clojure-mode-hook #'paredit-mode)
   (setq cider-repl-use-pretty-printing t)
   (setq cider-repl-display-help-banner nil)
+  (setq cider-repl-result-prefix ";; => ")
+  (setq cider-clojure-cli-parameters "dev")
   (defun cider-send-and-evaluate-sexp ()
   "Sends the s-expression located before the point or the active
       region to the REPL and evaluates it. Then the Clojure buffer is

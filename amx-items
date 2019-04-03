@@ -1,0 +1,20 @@
+
+;; ----- amx-history -----
+(
+ cider-jack-in-cljs
+ package-install
+ describe-personal-keybindings
+ cd
+ linum-mode
+ 5x5
+ amx
+)
+
+;; ----- amx-data -----
+(
+ (linum-mode . 1)
+ (package-install . 3)
+ (cd . 1)
+ (cider-jack-in-cljs . 10)
+ (describe-personal-keybindings . 1)
+)
