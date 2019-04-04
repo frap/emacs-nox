@@ -416,9 +416,6 @@ When ARG is:
 #+END_SRC
 
 *** Hooks
-#+BEGIN_SRC emacs-lisp
-
-
 **** Window and buffer switch
 #+BEGIN_SRC emacs-lisp
 (defvar nox-exit-window-hook nil
@@ -473,7 +470,6 @@ called. The buffer to be switched to is current when these hooks run.")
       (advice-add (car spec) :around (cdr spec)))))
 
 (add-hook 'emacs-startup-hook #'nox|setup-switch-hooks)
-
 #+END_SRC
 
 *** Emacs 25 compatibility
@@ -662,6 +658,7 @@ symbols.
 **** Files
 #+BEGIN_SRC emacs-lisp
 (setq! abbrev-file-name               (concat gas-local-dir "abbrev.el")
+       cider-history                  (concat gas-local-dir "cider-history")
        auto-save-file-name-transforms (list (list ".*" (concat gas-cache-dir "auto-save/") t))
        auto-save-list-file-prefix     (concat gas-cache-dir "auto-save/.saves-")
        auto-save-list-file-name       (concat gas-cache-dir "auto-save-list")
@@ -712,7 +709,7 @@ with functions that require it."
     buffer))
 (advice-add #'make-indirect-buffer :around #'gas*set-indirect-buffer-filename)
 #+END_SRC
-*** Enable disabled commands
+**** Enable disabled commands
 #+BEGIN_SRC emacs-lisp
 (put 'downcase-region 'disabled nil)
 (put 'upcase-region 'disabled nil)
@@ -776,7 +773,6 @@ with functions that require it."
        (setq! w32-get-true-file-attributes nil) ; fix file io slowdowns
        (when (display-graphic-p)
          (setenv "GIT_ASKPASS" "git-gui--askpass"))))
-
 #+END_SRC
 
 ** UI
@@ -1035,23 +1031,34 @@ Disable fringes in the minibuffer window.
 (defun gas|no-fringes-in-minibuffer (&rest _)
   "Disable fringes in the minibuffer window."
   (set-window-fringes (minibuffer-window) 0 0 nil))
-(add-hook! '(gas-post-init-hook minibuffer-setup-hook window-configuration-change-hook)
+(add-hook! '(emacs-startup-hook minibuffer-setup-hook window-configuration-change-hook)
            #'gas|no-fringes-in-minibuffer)
 #+END_SRC
 
 *** Modeline
 #+BEGIN_SRC emacs-lisp
-(use-package doom-modeline :ensure
-  :config
-  (setq! doom-modeline-enable-word-count t))
+;;(use-package doom-modeline :ensure
+;;  :config
+;;  (setq! doom-modeline-enable-word-count t))
+
+(setq!
+ mode-line-buffer-identification
+ `((:eval
+    (let ((inherit-faces (if (and buffer-file-name (buffer-modified-p)) '(error bold) 'mode-line-buffer-id)))
+      (concat (propertize "%b" 'face inherit-faces)))))
+ mode-line-modes '("" mode-name mode-line-process " ")
+ mode-line-position
+ '((line-number-mode (column-number-mode (column-number-indicator-zero-based " %l:%c" " %l:%C") " %l")
+                     (column-number-mode (column-number-indicator-zero-based " :%c" " :%C")))
+   (" " mode-line-percent-position " ")))
 #+END_SRC
 
 *** Appearance setup
 #+BEGIN_SRC emacs-lisp
 (defun gas-setup-appearance (frame)
   (with-selected-frame frame
-    (load-theme 'doom-one t)
-   ; (load-theme 'darktooth t)
+    ;;(load-theme 'doom-one t)
+    (load-theme 'darktooth t)
     (gas/change-font)
 
     (doom-modeline-mode)
@@ -1064,6 +1071,107 @@ Disable fringes in the minibuffer window.
 )
 #+END_SRC
 
+*** Buffer Popups
+shackle gives you the means to put an end to popped up buffers not behaving they way you’d like them to. By setting up simple rules you can for instance make Emacs always select help buffers for you or make everything reuse your currently selected window.
+#+BEGIN_SRC emacs-lisp
+(use-package shackle
+  :config
+  (progn
+    (setq shackle-lighter "")
+    (setq shackle-select-reused-windows nil) ; default nil
+    (setq shackle-default-alignment 'below) ; default below
+    (setq shackle-default-size 0.4) ; default 0.5
+
+    (setq shackle-rules
+          ;; CONDITION(:regexp)            :select     :inhibit-window-quit   :size+:align|:other     :same|:popup
+          '((compilation-mode              :select nil                                               )
+            ("*undo-tree*"                                                    :size 0.25 :align right)
+            ("*eshell*"                    :select t                          :other t               )
+            ("*HTTP Response*"             :popup t                                      :align right)
+            ("*Shell Command Output*"      :select nil                                               )
+            ("\\*Async Shell.*\\*" :regexp t :ignore t                                                 )
+            (occur-mode                    :select nil                                   :align t    )
+            (cider-repl-mode               :select nil                                   :popup t    )
+
+            ("*Help*"                      :select t   :inhibit-window-quit t :other t               )
+            ("*Completions*"                                                  :size 0.3  :align t    )
+            ("*Messages*"                  :select nil :inhibit-window-quit t :other t               )
+            ("\\*[Wo]*Man.*\\*"    :regexp t :select t   :inhibit-window-quit t :other t               )
+            ("\\*poporg.*\\*"      :regexp t :select t                          :other t               )
+            ("\\`\\*helm.*?\\*\\'"   :regexp t                                    :size 0.3  :align t    )
+            ("*Calendar*"                  :select t                          :size 0.3  :align below)
+            ("*info*"                      :select t   :inhibit-window-quit t                         :same t)
+            (magit-status-mode             :select t   :inhibit-window-quit t                         :same t)
+            (magit-log-mode                :select t   :inhibit-window-quit t                         :same t)
+            ))
+
+    (shackle-mode 1)))
+#+END_SRC
+;; Elements of the `shackle-rules' alist:
+;;
+;; |-----------+------------------------+--------------------------------------------------|
+;; | CONDITION | symbol                 | Major mode of the buffer to match                |
+;; |           | string                 | Name of the buffer                               |
+;; |           |                        | - which can be turned into regexp matching       |
+;; |           |                        | by using the :regexp key with a value of t       |
+;; |           |                        | in the key-value part                            |
+;; |           | list of either         | a list groups either symbols or strings          |
+;; |           | symbol or string       | (as described earlier) while requiring at        |
+;; |           |                        | least one element to match                       |
+;; |           | t                      | t as the fallback rule to follow when no         |
+;; |           |                        | other match succeeds.                            |
+;; |           |                        | If you set up a fallback rule, make sure         |
+;; |           |                        | it's the last rule in shackle-rules,             |
+;; |           |                        | otherwise it will always be used.                |
+;; |-----------+------------------------+--------------------------------------------------|
+;; | KEY-VALUE | :select t              | Select the popped up window. The                 |
+;; |           |                        | `shackle-select-reused-windows' option makes     |
+;; |           |                        | this the default for windows already             |
+;; |           |                        | displaying the buffer.                           |
+;; |-----------+------------------------+--------------------------------------------------|
+;; |           | :inhibit-window-quit t | Special buffers usually have `q' bound to        |
+;; |           |                        | `quit-window' which commonly buries the buffer   |
+;; |           |                        | and deletes the window. This option inhibits the |
+;; |           |                        | latter which is especially useful in combination |
+;; |           |                        | with :same, but can also be used with other keys |
+;; |           |                        | like :other as well.                             |
+;; |-----------+------------------------+--------------------------------------------------|
+;; |           | :ignore t              | Skip handling the display of the buffer in       |
+;; |           |                        | question. Keep in mind that while this avoids    |
+;; |           |                        | switching buffers, popping up windows and        |
+;; |           |                        | displaying frames, it does not inhibit what may  |
+;; |           |                        | have preceded this command, such as the          |
+;; |           |                        | creation/update of the buffer to be displayed.   |
+;; |-----------+------------------------+--------------------------------------------------|
+;; |           | :same t                | Display buffer in the current window.            |
+;; |           | :popup t               | Pop up a new window instead of displaying        |
+;; |           | *mutually exclusive*   | the buffer in the current one.                   |
+;; |-----------+------------------------+--------------------------------------------------|
+;; |           | :other t               | Reuse the window `other-window' would select if  |
+;; |           | *must not be used      | there's more than one window open, otherwise pop |
+;; |           | with :align, :size*    | up a new window. When used in combination with   |
+;; |           |                        | the :frame key, do the equivalent to             |
+;; |           |                        | other-frame or a new frame                       |
+;; |-----------+------------------------+--------------------------------------------------|
+;; |           | :align                 | Align a new window at the respective side of     |
+;; |           | 'above, 'below,        | the current frame or with the default alignment  |
+;; |           | 'left, 'right,         | (customizable with `shackle-default-alignment')  |
+;; |           | or t (default)         | by deleting every other window than the          |
+;; |           |                        | currently selected one, then wait for the window |
+;; |           |                        | to be "dealt" with. This can either happen by    |
+;; |           |                        | burying its buffer with q or by deleting its     |
+;; |           |                        | window with C-x 0.                               |
+;; |           | :size                  | Aligned window use a default ratio of 0.5 to     |
+;; |           | a floating point       | split up the original window in half             |
+;; |           | value between 0 and 1  | (customizable with `shackle-default-size'), the  |
+;; |           | is interpreted as a    | size can be changed on a per-case basis by       |
+;; |           | ratio. An integer >=1  | providing a different floating point value like  |
+;; |           | is interpreted as a    | 0.33 to make it occupy a third of the original   |
+;; |           | number of lines.       | window's size.                                   |
+;; |-----------+------------------------+--------------------------------------------------|
+;; |           | :frame t               | Pop buffer to a frame instead of a window.       |
+;; |-----------+------------------------+--------------------------------------------------|
+;;
 ** Minibuffer completion
 *** Counsel
 #+BEGIN_SRC emacs-lisp
@@ -1369,14 +1477,23 @@ Needed for ivy fuzzy matching.
                                                 'doc-view-mode)))
   (setq! company-dabbrev-ignore-buffers #'gas-company-dabbrev-buffer-check))
 
-;(use-package company-box
-; :defer
-; :after company
-; :hook (company-mode . company-box-mode))
+;;(use-package company-box
+;; :defer
+;; :after company
+;; :hook (company-mode . company-box-mode))
 #+END_SRC
 
 *** Projects
 #+BEGIN_SRC emacs-lisp
+
+(use-package ggtags
+ :defer
+ :config
+  (add-hook 'c-mode-common-hook
+          (lambda ()
+            (when (derived-mode-p 'c-mode 'c++-mode 'java-mode 'asm-mode)
+              (ggtags-mode 1)))))
+
 (use-package projectile :ensure
   :after-call (pre-command-hook after-find-file dired-before-readin-hook)
   :commands (projectile-project-root projectile-project-name projectile-project-p)
@@ -1427,7 +1544,7 @@ Needed for ivy fuzzy matching.
 ^^^^       Find               ^^   Search/Tags       ^^^^       Buffers               ^^   Cache                     ^^^^       Other
 ^^^^--------------------------^^---------------------^^^^-----------------------------^^------------------------------------------------------------------
 _f_/_s-f_: file               _a_: ag                ^^    _i_: Ibuffer               _c_: cache clear               ^^    _E_: edit project's .dir-locals.el
-^^    _F_: file dwim          ^^                     ^^    _b_: switch to buffer      _x_: remove known project      _s-p_/_p_: switch to other project
+^^    _F_: file dwim          _G_: gtags-update-tags ^^    _b_: switch to buffer      _x_: remove known project      _s-p_/_p_: switch to other project
 ^^    _d_: file curr dir      _o_: multi-occur       _K_/_s-k_: kill all buffers      _X_: cleanup non-existing      ^^    _g_: switch to Magit status of other project
 ^^    _l_: file literally     ^^                     ^^^^                             _z_: cache current             ^^    _P_: switch to an open project
 ^^    _r_: recent file        ^^                     ^^^^                             ^^                             ^^    _D_: find dir
@@ -1442,7 +1559,7 @@ _f_/_s-f_: file               _a_: ag                ^^    _i_: Ibuffer         
       ("D"   projectile-find-dir)
       ("E"   projectile-edit-dir-locals)
       ("g"   projectile-switch-project-magit-status)
-   ;   ("G"   ggtags-update-tags)
+      ("G"   ggtags-update-tags)
       ("i"   projectile-ibuffer)
       ("K"   projectile-kill-buffers)
       ("s-k" projectile-kill-buffers)
@@ -1619,7 +1736,8 @@ fundamental-mode) for performance sake."
 
 *** Go
 #+BEGIN_SRC emacs-lisp
-(use-package go-mode :ensure
+(use-package go-mode
+  :defer
   :custom (gofmt-command (substitute-in-file-name "$GOPATH/bin/goimports"))
   :config
   (add-hook! go-mode (add-hook! :local 'before-save-hook 'gofmt-before-save)))
@@ -1715,7 +1833,9 @@ Lisp function does not specify a special indentation."
          ("\\.cljc$" . clojurec-mode)
          )
   :init
-  (defconst clojure--prettify-symbols-alist
+
+  :config
+ (defconst clojure--prettify-symbols-alist
     '(("fn"   . ?λ)
       ("__"   . ?⁈)
       ("<=" . ?≤)
@@ -1726,40 +1846,82 @@ Lisp function does not specify a special indentation."
       ("=>" . ?⇒)
       ("lambda" . ?λ)
       ))
-  :config
   (add-hook! :append :local clojure-mode '(yas-minor-mode subword-mode global-prettify-symbols-mode))
-;;  (add-hook! :local clojure-mode 'subword-mode)
-;;  (add-hook! :local clojure-mode 'global-prettify-symbols-mode)
 )
+
+(use-package eldoc
+  :defer
+  :hook
+  (prog-mode       . turn-on-eldoc-mode)
+  (cider-repl-mode . turn-on-eldoc-mode))
+
+(defun zz/sp-enclose-next-sexp (num) (interactive "p") (insert-parentheses (or num 1)))
+(use-package smartparens
+  :defer
+  :bind (("M-n" . sp-next-sexp)
+         ("M-p" . sp-previous-sexp)
+         ("M-f" . sp-forward-sexp)
+         ("M-b" . sp-backward-sexp))
+
+  :config
+  ;; Enable smartparens everywhere
+  (require 'smartparens-config)
+
+  ;; Close a backtick with another backtick in clojure-mode
+  (sp-local-pair 'clojure-mode "`" "`" :when '(sp-in-string-p))
+  (sp-local-pair 'emacs-lisp-mode "`" nil :when '(sp-in-string-p))
+  :custom
+  (sp-base-key-bindings 'paredit)
+  :hook
+  ((clojure-mode
+    emacs-lisp-mode
+    lisp-mode
+    cider-repl-mode) . smartparens-strict-mode)
+  (smartparens-mode  . sp-use-paredit-bindings)
+  (smartparens-mode  . (lambda () (local-set-key (kbd "M-(") 'zz/sp-enclose-next-sexp)))
+)
+
+(use-package rainbow-delimiters
+  :defer t
+  :hook
+  ((prog-mode cider-repl-mode) . rainbow-delimiters-mode))
+
+(use-package clojure-mode-extra-font-locking
+:defer t)
 
 (use-package cider
   :defer
-  :init
-  (setq cider-auto-select-error-buffer t
-     ;;   cider-repl-prompt-function cider-repl-prompt-abbreviated
-        cider-repl-pop-to-buffer-on-connect 'display-only
-        cider-repl-use-clojure-font-lock t
-        cider-repl-wrap-history t
-        cider-repl-history-size 1000
-        cider-show-error-buffer t
-        nrepl-hide-special-buffers t
-        ;; Stop error buffer from popping up while working in buffers other than the REPL:
-        nrepl-popup-stacktraces nil)
-
   :bind  (:map cider-mode-map
                ("C-c C-v C-c" . cider-send-and-evaluate-sexp)
                ("C-c C-p"     . cider-eval-print-last-sexp))
+  :custom
+  ;; nice pretty printing
+  (cider-repl-use-pretty-printing nil)
+  ;; nicer font lock in REPL
+  (cider-repl-use-clojure-font-lock t)
+  ;; result prefix for the REPL
+  (cider-repl-result-prefix "; => ")
+  ;; never ending REPL history
+  (cider-repl-wrap-history t)
+  ;; looong history
+  (cider-repl-history-size 5000)
+  ;; persistent history
+  (cider-repl-history-file cider-history)
+  ;; error buffer not popping up
+  (cider-show-error-buffer nil)
+  ;; go right to the REPL buffer when it's finished connecting
+  (cider-repl-pop-to-buffer-on-connect t)
   :config
+;;  (require 'cider-eval-sexp-fu)
+  (add-hook 'cider-repl-mode-hook #'subword-mode)
   (add-hook 'cider-repl-mode-hook #'company-mode)
   (add-hook 'cider-mode-hook #'company-mode)
   (add-hook 'cider-mode-hook #'eldoc-mode)
+;; nrepl isn't based on comint
+  (add-hook 'cider-repl-mode-hook
+            (lambda () (setq show-trailing-whitespace nil)))
   ;; (add-hook 'cider-mode-hook #'cider-hydra-mode)
-  ;; (add-hook 'clojure-mode-hook #'paredit-mode)
-  (setq cider-repl-use-pretty-printing t)
-  (setq cider-repl-display-help-banner nil)
-  (setq cider-repl-result-prefix ";; => ")
-  (setq cider-clojure-cli-parameters "dev")
-  (defun cider-send-and-evaluate-sexp ()
+   (defun cider-send-and-evaluate-sexp ()
   "Sends the s-expression located before the point or the active
       region to the REPL and evaluates it. Then the Clojure buffer is
       activated as if nothing happened."
@@ -1789,8 +1951,28 @@ Lisp function does not specify a special indentation."
 #+BEGIN_SRC emacs-lisp
 (use-package web-mode :ensure
   :mode (("\\.\\(go\\)?html?\\'" . web-mode)))
+
+(use-package sgml-mode
+  :mode ("\\.html\\'" . html-mode)
+  :config (add-hook 'html-mode-hook 'turn-off-auto-fill))
 #+END_SRC
 
+*** erc
+#+BEGIN_SRC emacs-lisp
+(use-package erc
+  :commands erc
+  :init
+  (setq
+   erc-hide-list '("JOIN" "PART" "QUIT")
+   erc-insert-timestamp-function 'erc-insert-timestamp-left
+   erc-timestamp-format "[%H:%M] "
+   erc-timestamp-only-if-changed-flag nil
+   erc-truncate-mode t)
+  :config
+  (add-hook
+   'window-configuration-change-hook
+   (lambda () (setq erc-fill-column (- (window-width) 2)))))
+#+END_SRC
 ** Org Mode
 *** Base configuration
 #+BEGIN_SRC emacs-lisp
@@ -3125,7 +3307,7 @@ session as the current block. ARG has same meaning as in
   ^^                  ^^
   "
   ("q" nil)
-  ("b" magit-blame)
+  ("b" magit-blame-addition)
   ("c" magit-clone)
   ("i" magit-init)
   ("s" magit-status))
