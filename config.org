@@ -469,7 +469,8 @@ called. The buffer to be switched to is current when these hooks run.")
         (advice-remove (car spec) (cdr spec))
       (advice-add (car spec) :around (cdr spec)))))
 
-(add-hook 'emacs-startup-hook #'nox|setup-switch-hooks)
+;; disbaling as not sure how works
+;;(add-hook 'emacs-startup-hook #'nox|setup-switch-hooks)
 #+END_SRC
 
 *** Emacs 25 compatibility
@@ -778,8 +779,10 @@ with functions that require it."
 ** UI
 *** Settings
 #+BEGIN_SRC emacs-lisp
-(setq! initial-frame-alist '((fullscreen . fullboth)
-                             (fullscreen-restore . maximized))
+(setq! initial-frame-alist '( (top . 0) (left . 0) (width . 120) (height . 80)
+   ;;(fullscreen . fullboth)
+   ;;   (fullscreen-restore . maximized)
+                             )
        ring-bell-function #'ignore
        visible-bell nil
        custom-safe-themes t
@@ -1921,6 +1924,9 @@ Lisp function does not specify a special indentation."
   (add-hook 'cider-repl-mode-hook
             (lambda () (setq show-trailing-whitespace nil)))
   ;; (add-hook 'cider-mode-hook #'cider-hydra-mode)
+   ; Skip :user section of ~/.lein/profiles.clj when using cider-jack-in.
+  (setq cider-lein-parameters
+      "with-profile -user repl :headless :host localhost")
    (defun cider-send-and-evaluate-sexp ()
   "Sends the s-expression located before the point or the active
       region to the REPL and evaluates it. Then the Clojure buffer is
@@ -1945,7 +1951,26 @@ Lisp function does not specify a special indentation."
 (advice-add 'cider-eval-print-last-sexp :before #'ha/cider-append-comment)
 
 ;; cider to work with org-mode
-(setq org-babel-clojure-backend 'cider)
+(use-package ob-clojure
+:defer
+:config
+(setq org-babel-clojure-backend 'cider))
+
+(use-package flycheck-clojure
+  :defer t
+  :init
+  (add-hook 'emacs-startup-hook 'global-flycheck-mode)
+  :config
+  (use-package flycheck
+    :config
+    (flycheck-clojure-setup)))
+
+(use-package flycheck-pos-tip
+  :ensure t
+  :config
+  (use-package flycheck
+    :config
+    (setq flycheck-display-errors-function 'flycheck-pos-tip-error-messages)))
 #+END_SRC
 *** Web
 #+BEGIN_SRC emacs-lisp
