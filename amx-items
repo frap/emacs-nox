@@ -1,0 +1,17 @@
+
+;; ----- amx-history -----
+(
+ package-install
+ package-refresh-contents
+ cd
+ 5x5
+ amx
+ arp
+ dbx
+)
+
+;; ----- amx-data -----
+(
+ (package-install . 2)
+ (package-refresh-contents . 1)
+)
