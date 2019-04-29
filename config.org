@@ -501,8 +501,8 @@ called. The buffer to be switched to is current when these hooks run.")
               package-gnupghome-dir gas-packages-dir
               package-archives
               '(("gnu"   . "https://elpa.gnu.org/packages/")
-		      ("melpa-stable" . "https://stable.melpa.org/packages/")
-               ;; ("melpa" . "https://melpa.org/packages/")
+	        ("melpa-stable" . "https://stable.melpa.org/packages/")
+             ;;   ("melpa" . "https://melpa.org/packages/")
                 ("org"   . "https://orgmode.org/elpa/")))
 
 (unless (bound-and-true-p gnutls-verify-error)
@@ -782,8 +782,14 @@ with functions that require it."
 ** UI
 *** Settings
 #+BEGIN_SRC emacs-lisp
-(setq! initial-frame-alist '((fullscreen . fullboth)
-                             (fullscreen-restore . maximized))
+(setq! initial-frame-alist '( (width . 106) ; chars
+              (height . 60) ; lines
+              (background-color . "honeydew")
+              (left . 50)
+              (top . 50)
+              ;;(fullscreen . fullboth)
+       ;;      (fullscreen-restore . maximized)
+              )
        ring-bell-function #'ignore
        visible-bell nil
        custom-safe-themes t
@@ -867,7 +873,7 @@ with functions that require it."
 
 *** Font
 #+BEGIN_SRC emacs-lisp
-(defvar gas-fonts '(("Iosevka" . 13) ("Hack" . 13) ("DejaVu Sans Mono" . 11)
+(defvar gas-fonts '(("Hack" . 13)("Iosevka" . 13) ("DejaVu Sans Mono" . 11)
                     ("Inconsolata" . 13) ("Source Code Pro" . 11))
   "List of fonts and sizes. The first one available will be used.")
 
@@ -1349,7 +1355,7 @@ Needed for ivy fuzzy matching.
          company-transformers '(company-sort-by-occurrence))
 
   (setq-hook! prog-mode
-    company-backends '((:separate company-dabbrev-code company-capf company-yasnippet company-go)))
+    company-backends '((:separate company-dabbrev-code company-capf company-yasnippet)))
 
   (setq-hook! text-mode
     company-backends '((:separate company-dabbrev company-capf company-yasnippet)))
@@ -1369,10 +1375,10 @@ Needed for ivy fuzzy matching.
                                                 'doc-view-mode)))
   (setq! company-dabbrev-ignore-buffers #'gas-company-dabbrev-buffer-check))
 
-;(use-package company-box
-; :defer
-; :after company
-; :hook (company-mode . company-box-mode))
+(use-package company-box
+ :defer
+ :after company
+ :hook (company-mode . company-box-mode))
 #+END_SRC
 
 *** Projects
@@ -1687,6 +1693,7 @@ fundamental-mode) for performance sake."
 (use-package go-mode :ensure
   :custom (gofmt-command (substitute-in-file-name "$GOPATH/bin/goimports"))
   :config
+
   (add-hook! go-mode (add-hook! :local 'before-save-hook 'gofmt-before-save)))
 #+END_SRC
 
