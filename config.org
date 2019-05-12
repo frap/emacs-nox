@@ -499,7 +499,7 @@ called. The buffer to be switched to is current when these hooks run.")
               package-archives
               '(("gnu"   . "https://elpa.gnu.org/packages/")
 		          ("melpa-stable" . "https://stable.melpa.org/packages/")
-                ("melpa" . "https://melpa.org/packages/")
+            ;;    ("melpa" . "https://melpa.org/packages/")
                 ("org"   . "https://orgmode.org/elpa/")))
 
 (unless (bound-and-true-p gnutls-verify-error)
@@ -511,17 +511,18 @@ called. The buffer to be switched to is current when these hooks run.")
 
 **** Setup use-package
 #+BEGIN_SRC emacs-lisp
-(unless (package-installed-p 'use-package)
-  (package-refresh-contents)
-  (package-install 'use-package))
-
-;; Enable use-package
-;;(eval-when-compile
-;;  (require 'use-package)
-;;  (require 'delight)                    ;; if you use :delight
- ;; (require 'bind-key))                  ;; if you use any :bind variant
-
+(unless (package-installed-p 'use-package) ; unless it is already installed
+  (package-refresh-contents) ; update packages archive
+  (package-install 'use-package)) ; install the latest version of use-package
+(eval-when-compile
 (require 'use-package)
+)
+(require 'bind-key)
+;(setq use-package-always-ensure t)
+
+(use-package use-package-chords :ensure
+:config (key-chord-mode t))
+
 (setq! use-package-always-defer t
               use-package-verbose gas-debug-mode
               use-package-compute-statistics gas-debug-mode
@@ -606,12 +607,12 @@ symbols.
 
 **** General
 #+BEGIN_SRC emacs-lisp
-(use-package general :ensure
-  :demand
-  :config
-  (general-create-definer gas-leader :prefix "C-c")
-  (general-create-definer gas-local-leader :prefix "C-c m")
-)
+;(use-package general :ensure
+;  :demand
+;  :config
+;  (general-create-definer gas-leader :prefix "C-c")
+;  (general-create-definer gas-local-leader :prefix "C-c m")
+;)
 #+END_SRC
 
 ** General Settings and tweaks
@@ -1060,8 +1061,8 @@ Disable fringes in the minibuffer window.
 #+BEGIN_SRC emacs-lisp
 (defun gas-setup-appearance (frame)
   (with-selected-frame frame
-    ;;(load-theme 'doom-one t)
-    (load-theme 'darktooth t)
+    (load-theme 'doom-city-lights t)
+    ;;(load-theme 'darktooth t)
     (gas/change-font)
 
     (doom-modeline-mode)
@@ -1177,139 +1178,166 @@ shackle gives you the means to put an end to popped up buffers not behaving they
 ;;
 ** Minibuffer completion
 *** Counsel
+    Ivy backends for a lot more commands
 #+BEGIN_SRC emacs-lisp
-(use-package counsel :ensure
-  :defer 1
-  :after ivy
+(use-package counsel
   :after-call pre-command-hook
-;  :bind (:map ivy-minibuffer-help
-;        ("<return>" . ivy-alt-done)
-;        ("C-j"      . ivy-done)
-;        ("C-r"      . counsel-minibuffer-history)
- ;       )
-  :custom
-  (counsel-rg-base-command "rg -zS -M 120 --no-heading --line-number --color never %s .")
-  (counsel-ag-base-command "ag -zS --nocolor --nogroup %s")
-  (counsel-pt-base-command "pt -zS --nocolor --nogroup -e %s")
-  (counsel-grep-base-command
-   (cond ((executable-find "rg") "rg -zS -M 120 --no-heading --line-number --color never %s %s")
-         ((executable-find "ag") "ag -zS --nocolor --nogroup %s %s")
-         (t "grep -i -E -n -e %s %s")))
-  (counsel-find-file-ignore-regexp "\\(?:^[#.]\\)\\|\\(?:[#~]$\\)\\|\\(?:^Icon?\\)")
+  :after ivy
+  :chords (("JJ" . counsel-imenu)
+           (";'" . counsel-M-x))
+  :defer 0.5
+  :bind
+  ((:map read-expression-map
+         ("C-r" . counsel-expression-history))
+   (:map counsel-find-file-map
+         ("<left>" . counsel-up-directory)
+         ("<right>" . counsel-down-directory)))
 
   :config
-  (defun counsel-find-file-as-root (x)
-    "Find file X with root privileges."
-    (counsel-require-program counsel-root-command)
-    (let* ((method (file-remote-p x 'method))
-           (user (file-remote-p x 'user))
-           (host (file-remote-p x 'host))
-           (file-name (concat (if (string= method "ssh")
-                                  (format "/ssh:%s%s|"
-                                          (if user (format "%s@" user) "")
-                                          host)
-                                "/")
-                              (format "%s:%s:%s"
-                                      counsel-root-command
-                                      (or host "")
-                                      (expand-file-name
-                                       (if host
-                                           (file-remote-p x 'localname)
-                                         x))))))
-      (if (eq (current-buffer) (get-file-buffer x))
-          (find-alternate-file file-name)
-        (find-file file-name))))
 
-  (counsel-mode))
+  (counsel-mode)
+  (with-eval-after-load 'org-agenda
+    (bind-key "C-c C-q" #'counsel-org-tag-agenda org-agenda-mode-map))
+
+  (if (executable-find "rg")
+      ;; if rg is installed, use rg for `counsel-grep-or-swiper' and `counsel-rg'
+      (setq counsel-grep-base-command "rg --line-number --smart-case -M 150 --color never --mmap --no-heading %s %s"
+            ;; add `--follow' option to allow search through symbolic links
+            counsel-rg-base-command "rg --line-number --smart-case -M 150 --color never --follow --mmap --no-heading %s"
+            ;; Use ripgrep for counsel-git
+            counsel-git-cmd "rg --files")
+    ;; ignore case sensitivity for counsel grep
+    (setq counsel-grep-base-command "grep -nEi \"%s\" %s"))
+
+  (defun reloading (cmd)
+    (lambda (x)
+      (funcall cmd x)
+      (ivy--reset-state ivy-last)))
+  (defun given-file (cmd prompt) ; needs lexical-binding
+    (lambda (source)
+      (let ((target
+             (let ((enable-recursive-minibuffers t))
+               (read-file-name
+                (format "%s %s to:" prompt source)))))
+        (funcall cmd source target 1))))
+  (defun confirm-delete-file (x)
+    (dired-delete-file x 'confirm-each-subdirectory))
+
+  (ivy-add-actions
+   'counsel-find-file
+   `(("p" (lambda (path) (with-ivy-window (insert (file-relative-name path default-directory)))) "insert relative path")
+     ("P" (lambda (path) (with-ivy-window (insert path))) "insert absolute path")
+     ("l" (lambda (path) "Insert org-link with relative path"
+            (with-ivy-window (insert (format "[[./%s]]" (file-relative-name path default-directory))))) "insert org-link (rel. path)")
+     ("L" (lambda (path) "Insert org-link with absolute path"
+            (with-ivy-window (insert (format "[[%s]]" path)))) "insert org-link (abs. path)")))
+
+  (ivy-add-actions
+   'counsel-projectile-find-file
+   `(("m" ,(reloading (given-file #'rename-file "Move")) "move")
+     ("b" counsel-find-file-cd-bookmark-action "cd bookmark")))
+
+  ;;;###autoload
+  (defun +ivy-git-grep-other-window-action (x)
+    "Opens the current candidate in another window."
+    (when (string-match "\\`\\(.*?\\):\\([0-9]+\\):\\(.*\\)\\'" x)
+      (select-window
+       (with-ivy-window
+         (let ((file-name   (match-string-no-properties 1 x))
+               (line-number (match-string-no-properties 2 x)))
+           (find-file-other-window (expand-file-name file-name (ivy-state-directory ivy-last)))
+           (goto-char (point-min))
+           (forward-line (1- (string-to-number line-number)))
+           (re-search-forward (ivy--regex ivy-text t) (line-end-position) t)
+           (run-hooks 'counsel-grep-post-action-hook)
+           (selected-window))))))
+
+  (ivy-add-actions
+   'counsel-ag ; also applies to `counsel-rg' & `counsel-pt'
+   '(("O" +ivy-git-grep-other-window-action "open in other window")))
+
+  ;; find file at point
+  (setq counsel-find-file-at-point t)
+
+  ;; ignore . files or temporary files
+  (setq counsel-find-file-ignore-regexp
+        (concat
+         ;; File names beginning with # or .
+         "\\(?:\\`[#.]\\)"
+         ;; File names ending with # or ~
+         "\\|\\(?:\\`.+?[#~]\\'\\)"))
+
+  (setq counsel-mode-override-describe-bindings t
+        counsel-describe-function-function 'helpful-function
+        counsel-describe-variable-function 'helpful-variable
+        counsel-describe-function-preselect #'ivy-function-called-at-point)
+
+  (setq counsel-yank-pop-preselect-last t)
+  (setq counsel-grep-post-action-hook '(recenter))
+
+  (bind-keys
+   ([remap finder-by-keyword] . counsel-package) ; C-h p
+   ([remap bookmark-set] . counsel-bookmark)
+   ([remap info-lookup-symbol] . counsel-info-lookup-symbol)
+   ("C-c d s" . describe-symbol)
+   ("C-c d f" . counsel-faces)
+   ("C-c r g" . counsel-rg)))
+
+;; Add more ivy features for projectile related commands
+;; https://github.com/ericdanan/counsel-projectile/tree/master
+(use-package counsel-projectile
+  :after (counsel projectile)
+  :config (counsel-projectile-mode 1))
+
+
 #+END_SRC
 
 **** Better ~counsel-M-x~
-;#+BEGIN_SRC emacs-lisp
-;(use-package amx :ensure
-;  :custom
-;  (amx-save-file (concat gas-cache-dir "/amx-items")))
-;#+END_SRC
+     amx: An alternative M-x interface for Emacs.
+#+BEGIN_SRC emacs-lisp
+(use-package amx :ensure
+ :defer 0.5
+  :config (amx-mode)
+  :custom
+  (amx-save-file (concat gas-cache-dir "/amx-items")))
+#+END_SRC
 
 *** Ivy
-better than ido in kashualmodi's opinion.
+    ivy: incremental narrowing framework for Emacs
+    https://github.com/abo-abo/swiper
+    better than ido in kashualmodi's opinion.
 #+BEGIN_SRC emacs-lisp
-(use-package ivy :ensure
-  :defer 1
-  :after-call pre-command-hook
-  :bind (("C-c C-r" . ivy-resume)
-         ("C-x B"   . ivy-switch-buffer-other-window)
-         ("C-x b"   . 'ivy-switch-buffer))
-  :config
-  (setq! ivy-count-format "(%d/%d) "
-         ivy-extra-directories nil
-         ivy-fixed-height-minibuffer t
-         ivy-format-function #'ivy-format-function-line
-         ivy-height 15
-         ivy-initial-inputs-alist nil
-         ivy-magic-slash-non-match-action nil
-         ivy-on-del-error-function nil
-         ivy-use-selectable-prompt t
-         ivy-use-virtual-buffers t
-         ivy-virtual-abbreviate 'full
-         ivy-wrap t)
-  (use-package ivy-hydra
-  :ensure t
-  :commands (ivy-dispatching-done-hydra hydra-ivy/body)
-  :config
-  (progn
-    ;; Re-define the `hydra-ivy' defined in `ivy-hydra' package.
-    (defhydra hydra-ivy (:hint nil
-                         :color pink)
-          "
-^ _,_ ^      _f_ollow      occ_u_r      _g_o          ^^_c_alling: %-7s(if ivy-calling \"on\" \"off\")      _w_(prev)/_s_(next)/_a_(read) action: %-14s(ivy-action-name)
-_p_/_n_      _d_one        ^^           _i_nsert      ^^_m_atcher: %-7s(ivy--matcher-desc)^^^^^^^^^^^^      _C_ase-fold: %-10`ivy-case-fold-search
-^ _._ ^      _D_o it!      ^^           _q_uit        _<_/_>_ shrink/grow^^^^^^^^^^^^^^^^^^^^^^^^^^^^       _t_runcate: %-11`truncate-lines
-"
-          ;; Arrows
-          ("," ivy-beginning-of-buffer)      ;Default h
-          ("p" ivy-previous-line)            ;Default j
-          ("n" ivy-next-line)                ;Default k
-          ("." ivy-end-of-buffer)            ;Default l
-          ;; Quit ivy
-          ("q" keyboard-escape-quit :exit t) ;Default o
-          ("C-g" keyboard-escape-quit :exit t)
-          ;; Quit hydra
-          ("i" nil)
-          ("C-o" nil)
-          ;; actions
-          ("f" ivy-alt-done :exit nil)
-          ;; Exchange the default bindings for C-j and C-m
-          ("C-m" ivy-alt-done :exit nil) ;RET, default C-j
-          ("C-j" ivy-done :exit t)       ;Default C-m
-          ("d" ivy-done :exit t)
-          ("D" ivy-immediate-done :exit t)
-          ("g" ivy-call)
-          ("c" ivy-toggle-calling)
-          ("m" ivy-rotate-preferred-builders)
-          (">" ivy-minibuffer-grow)
-          ("<" ivy-minibuffer-shrink)
-          ("w" ivy-prev-action)
-          ("s" ivy-next-action)
-          ("a" ivy-read-action)
-          ("t" (setq truncate-lines (not truncate-lines)))
-          ("C" ivy-toggle-case-fold)
-          ("u" ivy-occur :exit t)
-          ("?" (ivy-exit-with-action    ;Default D
-                (lambda (_) (find-function #'hydra-ivy/body))) "Definition of this hydra" :exit t))
 
-  ;;  :bind-keymap
-   ;;      (:map ivy-minibuffer-map
-   ;;      ("C-t" . ivy-rotate-preferred-builders)
-   ;;      ("C-o" . hydra-ivy/body)
-   ;;      ("M-o" . ivy-dispatching-done-hydra))
-  ))
-;; :bind-keymap
-;;    (:map ivy-minibuffer-map
-     ;; Exchange the default bindings for C-j and C-m
-;;     ("C-m" . ivy-alt-done)             ;RET, default C-j
- ;;    ("C-j" . ivy-done)                 ;Default C-m
-  ;;   ("C-S-m" . ivy-immediate-done))
-  (ivy-mode))
+(use-package ivy
+  :bind (("C-c u" . ivy-resume))
+  :defer 0.5
+  :config
+  (ivy-mode)
+
+  (bind-chords
+   :map ivy-minibuffer-map
+   ("m," . ivy-beginning-of-buffer)
+   (",." . ivy-end-of-buffer))
+
+  (setq ivy-use-virtual-buffers t
+        ivy-height 13
+        ivy-count-format "%d/%d "
+        ivy-initial-inputs-alist nil
+        ivy-virtual-abbreviate 'full ; Show the full virtual file paths
+        ivy-extra-directories nil ; default value: ("../" "./")
+        ivy-format-function 'ivy-format-function-arrow
+        ivy-wrap t
+        ivy-action-wrap t
+        ivy-use-selectable-prompt t)
+
+  (bind-keys
+   :map ivy-occur-grep-mode-map
+   ("n" . ivy-occur-next-line)
+   ("p" . ivy-occur-previous-line)
+   ("b" . backward-char)
+   ("f" . forward-char)
+   ("v" . ivy-occur-press) ; default f
+   ("RET" . ivy-occur-press)))
 
 (use-package ivy-rich
   :after ivy
@@ -1325,10 +1353,15 @@ _p_/_n_      _d_one        ^^           _i_nsert      ^^_m_atcher: %-7s(ivy--mat
 
 **** Swiper
 #+BEGIN_SRC emacs-lisp
+
 (use-package swiper
-  :after ivy
-  :bind (("C-s" . swiper)
-         ("C-r" . swiper)))
+:after ivy
+  :bind (("C-s" . counsel-grep-or-swiper))
+  :config
+  (setq swiper-action-recenter t
+        ;; Jump to the beginning of match when leaving Swiper
+        swiper-goto-start-of-match t))
+
 #+END_SRC
 **** Fuzzy matching
 Needed for ivy fuzzy matching.
@@ -1500,8 +1533,6 @@ Needed for ivy fuzzy matching.
 (use-package projectile :ensure
   :after-call (pre-command-hook after-find-file dired-before-readin-hook)
   :commands (projectile-project-root projectile-project-name projectile-project-p)
-  :bind-keymap ("C-c p" . projectile-command-map)
-  :bind        ("C-c p" . hydra-projectile/body)
   :init
   (setq! projectile-cache-file (concat gas-cache-dir "projectile.cache")
          projectile-indexing-method (if IS-WINDOWS 'native 'alien)
@@ -1511,6 +1542,11 @@ Needed for ivy fuzzy matching.
          projectile-ignored-projects '("~" "/tmp"))
 
   :config
+  ;; Set the projectile-prefix-command binding
+  (bind-key "C-c p" 'projectile-command-map projectile-mode-map)
+
+  (setq projectile-completion-system 'ivy
+        projectile-enable-caching t)
   (setq! projectile-globally-ignored-directories (append projectile-globally-ignored-directories
                                                          (list (abbreviate-file-name gas-local-dir)
                                                                ".sync" "node_modules" "flow-typed"))
@@ -1547,8 +1583,8 @@ Needed for ivy fuzzy matching.
 ^^^^       Find               ^^   Search/Tags       ^^^^       Buffers               ^^   Cache                     ^^^^       Other
 ^^^^--------------------------^^---------------------^^^^-----------------------------^^------------------------------------------------------------------
 _f_/_s-f_: file               _a_: ag                ^^    _i_: Ibuffer               _c_: cache clear               ^^    _E_: edit project's .dir-locals.el
-^^    _F_: file dwim          _G_: gtags-update-tags ^^    _b_: switch to buffer      _x_: remove known project      _s-p_/_p_: switch to other project
-^^    _d_: file curr dir      _o_: multi-occur       _K_/_s-k_: kill all buffers      _X_: cleanup non-existing      ^^    _g_: switch to Magit status of other project
+^^    _F_: file dwim          _o_: multi-occur        _: switch to buffer      _x_: remove known project      _s-p_/_p_: switch to other project
+^^    _d_: file curr dir      ^^                     _K_/_s-k_: kill all buffers      _X_: cleanup non-existing      ^^    _g_: switch to Magit status of other project
 ^^    _l_: file literally     ^^                     ^^^^                             _z_: cache current             ^^    _P_: switch to an open project
 ^^    _r_: recent file        ^^                     ^^^^                             ^^                             ^^    _D_: find dir
 "
@@ -1582,16 +1618,16 @@ _f_/_s-f_: file               _a_: ag                ^^    _i_: Ibuffer         
 
   (projectile-mode))
 
-(use-package counsel-projectile :ensure
-  :bind-keymap
-    ([remap projectile-command-map "SPC"] .     counsel-projectile)
-  :bind
-    (([remap projectile-find-file]        .     counsel-projectile-find-file)
-     ([remap projectile-find-dir]         .     counsel-projectile-find-dir)
-     ([remap projectile-switch-to-buffer] .     counsel-projectile-switch-to-buffer)
-     ([remap projectile-grep]             .     counsel-projectile-grep)
-     ([remap projectile-ag]               .     counsel-projectile-ag)
-     ([remap projectile-switch-project]   .     counsel-projectile-switch-project))
+ (use-package counsel-projectile :ensure
+   :bind-keymap
+     ([remap projectile-command-map "SPC"] .     counsel-projectile)
+   :bind
+     (([remap projectile-find-file]        .     counsel-projectile-find-file)
+      ([remap projectile-find-dir]         .     counsel-projectile-find-dir)
+      ([remap projectile-switch-to-buffer] .     counsel-projectile-switch-to-buffer)
+      ([remap projectile-grep]             .     counsel-projectile-grep)
+      ([remap projectile-ag]               .     counsel-projectile-ag)
+      ([remap projectile-switch-project]   .     counsel-projectile-switch-project))
 
   :custom
   (projectile-completion-system 'ivy))
@@ -1828,6 +1864,7 @@ Lisp function does not specify a special indentation."
 
 *** Clojure
 #+BEGIN_SRC emacs-lisp
+
 (use-package clojure-mode
   :defer
   :mode (("\\.edn$"  . clojurec-mode)
@@ -1971,6 +2008,30 @@ Lisp function does not specify a special indentation."
   (use-package flycheck
     :config
     (setq flycheck-display-errors-function 'flycheck-pos-tip-error-messages)))
+#+END_SRC
+*** JS
+#+BEGIN_SRC emacs-lisp
+(use-package typescript-mode
+:ensure t)
+
+;; from the Tide README
+(defun setup-tide-mode ()
+  "Set up Tide mode."
+  (interactive)
+  (tide-setup)
+  (flycheck-mode +1)
+  (setq flycheck-check-syntax-automatically '(save-mode-enabled))
+  (eldoc-mode +1)
+  (tide-hl-identifier-mode +1)
+  (company-mode +1))
+
+(use-package tide
+:ensure t
+:config
+(setq company-tooltip-align-annotations t)
+(add-hook 'before-save-hook 'tide-format-before-save)
+(add-hook 'typescript-mode-hook #'setup-tide-mode)
+)
 #+END_SRC
 *** Web
 #+BEGIN_SRC emacs-lisp
