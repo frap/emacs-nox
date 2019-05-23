@@ -1,21 +1,26 @@
 ;; early-init.el -*- lexical-binding: t -*-
 ;; Author: copied from weirdNox (Andrés Gasson)
 
-(defvar nox--file-name-handler-alist file-name-handler-alist)
+(defconst emacs-start-time (current-time))
 
-(defun nox|reset-temporary-init-values ()
+(defvar initial--file-name-handler-alist file-name-handler-alist)
+
+(defun gas|reset-temporary-init-values ()
   "Resets garbage collection settings to reasonable defaults (if you don't do
 this, you'll get stuttering and random freezes) and resets `file-name-handler-alist'."
-  (setq file-name-handler-alist nox--file-name-handler-alist
+  (setq file-name-handler-alist initial--file-name-handler-alist
         gc-cons-threshold 16777216
         gc-cons-percentage 0.15))
 
 (unless noninteractive
   (unless after-init-time
-    (setq gc-cons-threshold 402653184
-          gc-cons-percentage 1.0
-          file-name-handler-alist nil))
-  (add-hook 'emacs-startup-hook #'nox|reset-temporary-init-values))
+    (setq package-enable-at-startup nil
+          gc-cons-threshold 402653184
+          gc-cons-percentage 0.6
+          message-log-max 16384
+          file-name-handler-alist nil
+          auto-window-vscroll nil))
+  (add-hook 'emacs-startup-hook #'gas|reset-temporary-init-values))
 
 (setq load-prefer-newer noninteractive
       package-enable-at-startup nil)

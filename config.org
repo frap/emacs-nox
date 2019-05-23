@@ -152,7 +152,7 @@ Also create the directories if they don't exist.
 )
 #+END_SRC
 
-
+**** Hooks
 #+BEGIN_SRC emacs-lisp
 (defun gas-resolve-hook-forms (hooks)
   (declare (pure t) (side-effect-free t))
@@ -499,7 +499,7 @@ called. The buffer to be switched to is current when these hooks run.")
               package-archives
               '(("gnu"   . "https://elpa.gnu.org/packages/")
 		          ("melpa-stable" . "https://stable.melpa.org/packages/")
-                ("melpa" . "https://melpa.org/packages/")
+               ;; ("melpa" . "https://melpa.org/packages/")
                 ("org"   . "https://orgmode.org/elpa/")))
 
 (unless (bound-and-true-p gnutls-verify-error)
@@ -1887,7 +1887,6 @@ Lisp function does not specify a special indentation."
 )
 
 (use-package rainbow-delimiters
-  :defer t
   :hook
   ((prog-mode cider-repl-mode) . rainbow-delimiters-mode))
 
@@ -3473,4 +3472,20 @@ session as the current block. ARG has same meaning as in
          which-key-min-display-lines 6
          which-key-side-window-slot -10)
   (which-key-mode))
+#+END_SRC
+
+
+** Final Initialisation
+#+BEGIN_SRC emacs-lisp
+(let ((elapsed (float-time (time-subtract (current-time)
+                                          emacs-start-time))))
+  (message "Loading %s...done (%.3fs)" load-file-name elapsed))
+
+(add-hook 'emacs-startup-hook
+          `(lambda ()
+             (let ((elapsed
+                    (float-time
+                     (time-subtract (current-time) emacs-start-time))))
+               (message "Loading %s...done (%.3fs) [after-init]"
+                        ,load-file-name elapsed))) t)
 #+END_SRC
