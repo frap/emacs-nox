@@ -1856,13 +1856,17 @@ fundamental-mode) for performance sake."
   :config
   ;; Enable smartparens everywhere
   (require 'smartparens-config)
-
+  (sp-pair "=" "=" :actions '(wrap))
+  (sp-pair "+" "+" :actions '(wrap))
+  (sp-pair "<" ">" :actions '(wrap))
+  (sp-pair "$" "$" :actions '(wrap))
   ;; Close a backtick with another backtick in clojure-mode
   (sp-local-pair 'clojure-mode "`" "`" :when '(sp-in-string-p))
   (sp-local-pair 'emacs-lisp-mode "`" nil :when '(sp-in-string-p))
   :custom
   (sp-base-key-bindings 'paredit)
   :hook
+  ;; (after-init . smartparens-global-mode)
   ((clojure-mode
     emacs-lisp-mode
     lisp-mode
