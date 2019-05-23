@@ -1299,7 +1299,7 @@ shackle gives you the means to put an end to popped up buffers not behaving they
  :defer 0.5
   :config (amx-mode)
   :custom
-  (amx-save-file (concat gas-cache-dir "/amx-items")))
+  (amx-save-file (concat gas-cache-dir "amx-items")))
 #+END_SRC
 
 *** Ivy
@@ -1440,6 +1440,8 @@ Needed for ivy fuzzy matching.
 #+END_SRC
 
 **** Recent files
+;; Turn on recent file mode so that you can more easily switch to
+;; recently edited files when you first start emacs
 #+BEGIN_SRC emacs-lisp
 (use-package recentf
   :defer 1
@@ -1784,86 +1786,34 @@ fundamental-mode) for performance sake."
 
 *** Lisp
 #+BEGIN_SRC emacs-lisp
+;; a great lisp coding hook
+(defun gas-lisp-coding-defaults ()
+  (smartparens-strict-mode +1)
+  (rainbow-delimiters-mode +1))
+
+(setq gas-lisp-coding-hook 'gas-lisp-coding-defaults)
+
+;; interactive modes don't need whitespace checks
+(defun gas-interactive-lisp-coding-defaults ()
+  (smartparens-strict-mode +1)
+  (rainbow-delimiters-mode +1)
+  (whitespace-mode -1))
+
+(setq gas-interactive-lisp-coding-hook 'gas-interactive-lisp-coding-defaults)
+
 (use-package lisp-mode
   :mode ("\\.lte" . lisp-mode)
-  :config
-  (defun gas-lisp-indent-function (indent-point state)
-    "This function is the normal value of the variable `lisp-indent-function'.
-The function `calculate-lisp-indent' calls this to determine
-if the arguments of a Lisp function call should be indented specially.
-INDENT-POINT is the position at which the line being indented begins.
-Point is located at the point to indent under (for default indentation);
-STATE is the `parse-partial-sexp' state for that position.
-If the current line is in a call to a Lisp function that has a non-nil
-property `lisp-indent-function' (or the deprecated `lisp-indent-hook'),
-it specifies how to indent.  The property value can be:
-,,* `defun', meaning indent `defun'-style
-  \(this is also the case if there is no property and the function
-  has a name that begins with \"def\", and three or more arguments);
-,,* an integer N, meaning indent the first N arguments specially
-  (like ordinary function arguments), and then indent any further
-  arguments like a body;
-,,* a function to call that returns the indentation (or nil).
-  `lisp-indent-function' calls this function with the same two arguments
-  that it itself received.
-This function returns either the indentation to use, or nil if the
-Lisp function does not specify a special indentation."
-    (let ((normal-indent (current-column))
-          (orig-point (point)))
-      (goto-char (1+ (elt state 1)))
-      (parse-partial-sexp (point) calculate-lisp-indent-last-sexp 0 t)
-      (cond
-       ;; car of form doesn't seem to be a symbol, or is a keyword
-       ((and (elt state 2)
-             (or (not (looking-at "\\sw\\|\\s_"))
-                 (looking-at ":")))
-        (if (not (> (save-excursion (forward-line 1) (point))
-                    calculate-lisp-indent-last-sexp))
-            (progn (goto-char calculate-lisp-indent-last-sexp)
-                   (beginning-of-line)
-                   (parse-partial-sexp (point)
-                                       calculate-lisp-indent-last-sexp 0 t)))
-        ;; Indent under the list or under the first sexp on the same
-        ;; line as calculate-lisp-indent-last-sexp.  Note that first
-        ;; thing on that line has to be complete sexp since we are
-        ;; inside the innermost containing sexp.
-        (backward-prefix-chars)
-        (current-column))
-       ((and (save-excursion
-               (goto-char indent-point)
-               (skip-syntax-forward " ")
-               (not (looking-at ":")))
-             (save-excursion
-               (goto-char orig-point)
-               (looking-at ":")))
-        (save-excursion
-          (goto-char (+ 2 (elt state 1)))
-          (current-column)))
-       (t
-        (let ((function (buffer-substring (point)
-                                          (progn (forward-sexp 1) (point))))
-              method)
-          (setq method (or (function-get (intern-soft function)
-                                         'lisp-indent-function)
-                           (get (intern-soft function) 'lisp-indent-hook)))
-          (cond ((or (eq method 'defun)
-                     (and (null method)
-                          (> (length function) 3)
-                          (string-match "\\`def" function)))
-                 (lisp-indent-defform state indent-point))
-                ((integerp method)
-                 (lisp-indent-specform method state
-                                       indent-point normal-indent))
-                (method
-                 (funcall method indent-point state))))))))
-
-  (setq-hook! (lisp-mode emacs-lisp-mode)
-    lisp-indent-function 'gas-lisp-indent-function))
+  )
 
 #+END_SRC
 
 *** Clojure
 #+BEGIN_SRC emacs-lisp
+
+;(with-eval-after-load 'clojure-mode
+;  (defun gas-clojure-mode-defaults ()
+;    (subword-mode +1)
+;    (run-hooks 'gas-lisp-coding-hook))
 
 (use-package clojure-mode
   :defer
@@ -1886,7 +1836,7 @@ Lisp function does not specify a special indentation."
       ("=>" . ?⇒)
       ("lambda" . ?λ)
       ))
-  (add-hook! :append :local clojure-mode '(yas-minor-mode subword-mode global-prettify-symbols-mode))
+  (add-hook! :append :local clojure-mode '(yas-minor-mode subword-mode global-prettify-symbols-mode gas-lisp-coding-hook))
 )
 
 (use-package eldoc
@@ -1924,7 +1874,7 @@ Lisp function does not specify a special indentation."
 (use-package rainbow-delimiters
   :defer t
   :hook
-  ((prog-mode cider-repl-mode) . rainbow-delimiters-mode))
+  ((prog-mode cider-repl-mode clojure-mode) . rainbow-delimiters-mode))
 
 (use-package clojure-mode-extra-font-locking
 :defer t)
@@ -1932,7 +1882,7 @@ Lisp function does not specify a special indentation."
 (use-package cider
   :defer
   :bind  (:map cider-mode-map
-               ("C-c C-v C-c" . cider-send-and-evaluate-sexp)
+           ;;    ("C-c C-v C-c" . cider-send-and-evaluate-sexp)
                ("C-c C-p"     . cider-eval-print-last-sexp))
   :custom
   ;; nice pretty printing
@@ -1949,14 +1899,16 @@ Lisp function does not specify a special indentation."
   (cider-repl-history-file cider-history)
   ;; error buffer not popping up
   (cider-show-error-buffer nil)
-  ;; go right to the REPL buffer when it's finished connecting
-  (cider-repl-pop-to-buffer-on-connect t)
+  ;; REPL buffer auto-displayed but not focused
+  (cider-repl-pop-to-buffer-on-connect 'display-only)
   :config
 ;;  (require 'cider-eval-sexp-fu)
   (add-hook 'cider-repl-mode-hook #'subword-mode)
   (add-hook 'cider-repl-mode-hook #'company-mode)
   (add-hook 'cider-mode-hook #'company-mode)
   (add-hook 'cider-mode-hook #'eldoc-mode)
+;; autoscrolling repl output
+(add-hook 'cider-repl-mode-hook '(lambda () (setq scroll-conservatively 101)))
 ;; nrepl isn't based on comint
   (add-hook 'cider-repl-mode-hook
             (lambda () (setq show-trailing-whitespace nil)))
@@ -2284,10 +2236,12 @@ _n_: note          _c_: clojure
    (octave . t)
    (clojure . t)
    (python . t)
+   (plantuml . t)
    (latex . t)
    (shell . t)
    (calc . t)))
 
+(setq org-plantuml-jar-path "/usr/local/Cellar/plantuml/1.2018.10/libexec/plantuml.jar" )
 (add-hook 'org-babel-after-execute-hook 'org-redisplay-inline-images)
 #+END_SRC
 
@@ -3459,6 +3413,13 @@ session as the current block. ARG has same meaning as in
 #+END_SRC
 
 **** Uniquify
+;; "When several buffers visit identically-named files,
+;; Emacs must give the buffers distinct names. The usual method
+;; for making buffer names unique adds ‘<2>’, ‘<3>’, etc. to the end
+;; of the buffer names (all but one of them).
+;; The forward naming method includes part of the file's directory
+;; name at the beginning of the buffer name
+;; https://www.gnu.org/software/emacs/manual/html_node/emacs/Uniquify.html
 #+BEGIN_SRC emacs-lisp
 (use-package uniquify
   :custom
