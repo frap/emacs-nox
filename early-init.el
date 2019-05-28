@@ -26,5 +26,5 @@ this, you'll get stuttering and random freezes) and resets `file-name-handler-al
       package-enable-at-startup nil)
 
 (if (fboundp 'tool-bar-mode) (tool-bar-mode -1))
-(if (fboundp 'menu-bar-mode) (menu-bar-mode -1))
+;;(if (fboundp 'menu-bar-mode) (menu-bar-mode -1))
 (if (fboundp 'scroll-bar-mode) (scroll-bar-mode -1))

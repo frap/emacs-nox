@@ -1,3 +1,7 @@
+#+property: header-args:emacs-lisp :tangle (concat (file-name-sans-extension (buffer-file-name)) ".el")
+#+property: header-args :mkdirp yes :comments no
+#+startup: indent
+
 #+TITLE: Gases Emacs configuration
 #+AUTHOR: Andrés Gasson (Gas)
 #+BEGIN_SRC emacs-lisp
@@ -27,7 +31,7 @@ Gonçalo Santos’s Emacs configuration.
 
 ** Essential
 *** Built-in packages
-#+BEGIN_SRC emacs-lisp
+#+Begin_SRC emacs-lisp
 (require 'subr-x)
 (require 'cl-lib)
 #+END_SRC
@@ -415,62 +419,62 @@ When ARG is:
   (byte-compile-file (concat user-emacs-directory "early-init.el")))
 #+END_SRC
 
-*** Hooks
+*** Window Hooks
 **** Window and buffer switch
 #+BEGIN_SRC emacs-lisp
-(defvar nox-exit-window-hook nil
+(defvar gas-exit-window-hook nil
   "Hook run before `switch-window' or `switch-frame' are called. See
-`nox-enter-window-hook'.")
+`gas-enter-window-hook'.")
 
-(defvar nox-enter-window-hook nil
+(defvar gas-enter-window-hook nil
   "Hook run after `switch-window' or `switch-frame' are called. See
-`nox-exit-window-hook'.")
+`gas-exit-window-hook'.")
 
-(defvar nox-exit-buffer-hook nil
+(defvar gas-exit-buffer-hook nil
   "Hook run before `switch-to-buffer', `pop-to-buffer' or `display-buffer' are
 called. The buffer to be switched to is current when these hooks run.")
 
-(defvar nox-enter-buffer-hook nil
+(defvar gas-enter-buffer-hook nil
   "Hook run after `switch-to-buffer', `pop-to-buffer' or `display-buffer' are
 called. The buffer to be switched to is current when these hooks run.")
 
-(defvar nox-inhibit-switch-buffer-hooks nil)
-(defvar nox-inhibit-switch-window-hooks nil)
+(defvar gas-inhibit-switch-buffer-hooks nil)
+(defvar gas-inhibit-switch-window-hooks nil)
 
-(defun nox*switch-window-hooks (orig-fn window &optional norecord)
-  (if (or nox-inhibit-switch-window-hooks
+(defun gas*switch-window-hooks (orig-fn window &optional norecord)
+  (if (or gas-inhibit-switch-window-hooks
           (null window)
           (eq window (selected-window))
           (window-minibuffer-p)
           (window-minibuffer-p window))
       (funcall orig-fn window norecord)
-    (let ((nox-inhibit-switch-window-hooks t))
-      (run-hooks 'nox-exit-window-hook)
+    (let ((gas-inhibit-switch-window-hooks t))
+      (run-hooks 'gas-exit-window-hook)
       (prog1 (funcall orig-fn window norecord)
         (with-selected-window window
-          (run-hooks 'nox-enter-window-hook))))))
+          (run-hooks 'gas-enter-window-hook))))))
 
-(defun nox*switch-buffer-hooks (orig-fn buffer-or-name &rest args)
-  (if (or nox-inhibit-switch-buffer-hooks
+(defun gas*switch-buffer-hooks (orig-fn buffer-or-name &rest args)
+  (if (or gas-inhibit-switch-buffer-hooks
           (eq (get-buffer buffer-or-name) (current-buffer)))
       (apply orig-fn buffer-or-name args)
-    (let ((nox-inhibit-switch-buffer-hooks t))
-      (run-hooks 'nox-exit-buffer-hook)
+    (let ((gas-inhibit-switch-buffer-hooks t))
+      (run-hooks 'gas-exit-buffer-hook)
       (prog1 (apply orig-fn buffer-or-name args)
         (with-current-buffer buffer-or-name
-          (run-hooks 'nox-enter-buffer-hook))))))
+          (run-hooks 'gas-enter-buffer-hook))))))
 
-(defun nox|setup-switch-hooks (&optional disable)
-  (dolist (spec '((select-window . nox*switch-window-hooks)
-                  (switch-to-buffer . nox*switch-buffer-hooks)
-                  (display-buffer . nox*switch-buffer-hooks)
-                  (pop-to-buffer . nox*switch-buffer-hooks)))
+(defun gas|setup-switch-hooks (&optional disable)
+  (dolist (spec '((select-window . gas*switch-window-hooks)
+                  (switch-to-buffer . gas*switch-buffer-hooks)
+                  (display-buffer . gas*switch-buffer-hooks)
+                  (pop-to-buffer . gas*switch-buffer-hooks)))
     (if disable
         (advice-remove (car spec) (cdr spec))
       (advice-add (car spec) :around (cdr spec)))))
 
-;; disbaling as not sure how works
-;;(add-hook 'emacs-startup-hook #'nox|setup-switch-hooks)
+;; disabling as not sure how works
+(add-hook 'emacs-startup-hook #'gas|setup-switch-hooks)
 #+END_SRC
 
 *** Emacs 25 compatibility
@@ -488,20 +492,35 @@ called. The buffer to be switched to is current when these hooks run.")
                      (assq key alist)
                    (assoc key alist testfn))))
           (if x (cdr x) default)))
-      (advice-add #'alist-get :override #'gas*alist-get))))
+      (advice-add #'alist-get :override #'gas*alist-get)
+      (defvar gensym-counter 0
+ 	  "Number used to construct the name of the next symbol created by `gensym'.")
+
+      (defun gensym (&optional prefix)
+        "Return a new uninterned symbol.
+ 	The name is made by appending `gensym-counter' to PREFIX.
+ 	PREFIX is a string, and defaults to \"g\"."
+        (let ((num (prog1 gensym-counter
+                     (setq gensym-counter (1+ gensym-counter)))))
+          (make-symbol (format "%s%d" (or prefix "g") num))))
+      (defun cadar (x)
+ 	      "Return the `car' of the `cdr' of the `car' of X."
+ 	      (declare (compiler-macro internal--compiler-macro-cXXr))
+ 	       (car (cdr (car x))))
+)))
 #+END_SRC
 
 *** Package ecosystem
 #+BEGIN_SRC emacs-lisp
 (require 'package)
-(setq! package-user-dir      gas-packages-dir
+(setq!        package-user-dir      gas-packages-dir
               package-gnupghome-dir gas-packages-dir
               package-archives
-              '(("gnu"   . "https://elpa.gnu.org/packages/")
+              '(("gnu"          . "https://elpa.gnu.org/packages/")
 		          ("melpa-stable" . "https://stable.melpa.org/packages/")
-
-               ;; ("melpa" . "https://melpa.org/packages/")
-                ("org"   . "https://orgmode.org/elpa/")))
+              ;;  ("marmalade"    . "https://marmalade-repo.org/packages/")
+                ("melpa"        . "https://melpa.org/packages/")
+                ("org"          . "https://orgmode.org/elpa/")))
 
 (unless (bound-and-true-p gnutls-verify-error)
   (dolist (archive package-archives)
@@ -514,11 +533,13 @@ called. The buffer to be switched to is current when these hooks run.")
 #+BEGIN_SRC emacs-lisp
 (unless (package-installed-p 'use-package) ; unless it is already installed
   (package-refresh-contents) ; update packages archive
-  (package-install 'use-package)) ; install the latest version of use-package
+  (package-install 'use-package); install the latest version of use-package
+  (package-install 'delight))
 (eval-when-compile
 (require 'use-package)
-)
 (require 'bind-key)
+(require 'delight)
+)
 ;(setq use-package-always-ensure t)
 
 (use-package use-package-chords :ensure
@@ -604,16 +625,6 @@ symbols.
 (use-package hydra :ensure
   :bind ("C-c m" . hydra-magit/body)
   :config (setq! lv-use-separator t))
-#+END_SRC
-
-**** General
-#+BEGIN_SRC emacs-lisp
-;(use-package general :ensure
-;  :demand
-;  :config
-;  (general-create-definer gas-leader :prefix "C-c")
-;  (general-create-definer gas-local-leader :prefix "C-c m")
-;)
 #+END_SRC
 
 ** General Settings and tweaks
@@ -731,6 +742,7 @@ with functions that require it."
 (cond (IS-MAC
        (setq! mac-command-modifier 'super
               mac-option-modifier  'meta
+              mac-right-option-modifier 'alt
              ;; sane trackpad/mouse scroll settings
              mac-redisplay-dont-reset-vscroll t
              mac-mouse-wheel-smooth-scroll nil
@@ -1001,17 +1013,19 @@ ARGS are the same as in `custom-set-faces'."
 				                     theme
 				                     `(org-block
 				                       ((t (:foreground ,(color-darken-name base0 7) :background ,(color-darken-name base03 7)))))))))
+
+ (use-package gruvbox-theme :ensure)
 #+END_SRC
 
-**** Extra programming keywords
+**** Extra font-lock-faces
 #+BEGIN_SRC emacs-lisp
 (defface font-lock-todo-face      '((t (:foreground "#dc322f" :weight bold :underline t))) "Face for TODO keywords.")
 (defface font-lock-urgent-face    '((t (:foreground "#b58900" :weight bold :underline t))) "Face for URGENT keywords.")
 (defface font-lock-note-face      '((t (:foreground "#228b22" :weight bold :underline t))) "Face for NOTE keywords.")
 (defface font-lock-study-face     '((t (:foreground "#41728e" :weight bold :underline t))) "Face for STUDY keywords.")
 (add-hook! prog-mode (font-lock-add-keywords
-                      nil '(("\\<\\(TODO\\|FIXME\\|@important\\|IMPORTANT\\)" 1 'font-lock-todo-face t)
-                            ("\\<\\(URGENT\\|@urgent\\)" 1 'font-lock-urgent-face t)
+                      nil '(("\\<\\(TODO\\|FIXME\\|\\@important\\|IMPORTANT\\)" 1 'font-lock-todo-face t)
+                            ("\\<\\(URGENT\\|\\@urgent\\)" 1 'font-lock-urgent-face t)
                             ("\\<\\(NOTE\\|QUOTE\\)" 1 'font-lock-note-face t)
                             ("\\<\\(STUDY\\|LAREVUE\\)" 1 'font-lock-study-face t))))
 #+END_SRC
@@ -1042,9 +1056,9 @@ Disable fringes in the minibuffer window.
 
 *** Modeline
 #+BEGIN_SRC emacs-lisp
-;;(use-package doom-modeline :ensure
-;;  :config
-;;  (setq! doom-modeline-enable-word-count t))
+(use-package doom-modeline :ensure
+  :config
+  (setq! doom-modeline-enable-word-count t))
 
 (setq!
  mode-line-buffer-identification
@@ -1064,6 +1078,7 @@ Disable fringes in the minibuffer window.
   (with-selected-frame frame
     (load-theme 'doom-city-lights t)
     ;;(load-theme 'darktooth t)
+    ;;(load-theme gruvbox)
     (gas/change-font)
 
     (doom-modeline-mode)
@@ -1178,15 +1193,97 @@ shackle gives you the means to put an end to popped up buffers not behaving they
 ;; |-----------+------------------------+--------------------------------------------------|
 ;;
 ** Minibuffer completion
+The [[https://tuhdo.github.io/helm-intro.html][battle]] [[https://news.ycombinator.com/item?id=11100312][rages]] [[https://www.reddit.com/r/emacs/comments/3o36sc/what_do_you_prefer_ido_or_helm/][on]] - [[https://github.com/emacs-helm/helm][helm]] or [[https://www.emacswiki.org/emacs/InteractivelyDoThings][IDO]]? Both are nice completion frameworks for Emacs, and both integrate nicely with most main Emacs functions, including file opening, command and buffer selection, etc. I was using IDO for some time but are now giving helm a try. Both my configs are shown below, but only Helm is enabled at the moment.
+*** IDO
+
+I use [[https://www.masteringemacs.org/article/introduction-to-ido-mode][IDO mode]] to get better matching capabilities everywhere in Emacs (disabled while I give helm a try, see below).
+
+#+begin_src emacs-lisp
+  (use-package ido
+    :disabled t
+    :config
+    (ido-mode t)
+    (ido-everywhere 1)
+    (setq ido-use-virtual-buffers t)
+    (setq ido-enable-flex-matching t)
+    (setq ido-use-filename-at-point nil)
+    (setq ido-auto-merge-work-directories-length -1))
+
+  (use-package ido-completing-read+
+    :disabled t
+    :config
+    (ido-ubiquitous-mode 1))
+#+end_src
+
+*** Helm
+
+This config came originally from [[https://github.com/daedreth/UncleDavesEmacs#user-content-ido-and-why-i-started-using-helm][Uncle Dave's Emacs config]], thought I have tweaked it a bit.
+
+#+begin_src emacs-lisp
+  (use-package helm
+    :ensure
+    :defer 1
+    :delight helm-mode
+    :bind
+    (("C-x C-f"       . helm-find-files)
+     ("C-x C-b"       . helm-buffers-list)
+     ("C-x b"         . helm-multi-files)
+     ("M-x"           . helm-M-x)
+     :map helm-find-files-map
+     ("C-<backspace>" . helm-find-files-up-one-level)
+     ("C-f"           . helm-execute-persistent-action)
+     ([tab]           . helm-ff-RET))
+    :config
+    (defun daedreth/helm-hide-minibuffer ()
+      (when (with-helm-buffer helm-echo-input-in-header-line)
+        (let ((ov (make-overlay (point-min) (point-max) nil nil t)))
+          (overlay-put ov 'window (selected-window))
+          (overlay-put ov 'face
+                       (let ((bg-color (face-background 'default nil)))
+                         `(:background ,bg-color :foreground ,bg-color)))
+          (setq-local cursor-type nil))))
+    (add-hook 'helm-minibuffer-set-up-hook 'daedreth/helm-hide-minibuffer)
+    (setq helm-autoresize-max-height 0
+          helm-autoresize-min-height 40
+          helm-M-x-fuzzy-match t
+          helm-buffers-fuzzy-matching t
+          helm-recentf-fuzzy-match t
+          helm-semantic-fuzzy-match t
+          helm-imenu-fuzzy-match t
+          helm-split-window-in-side-p nil
+          helm-move-to-line-cycle-in-source nil
+          helm-ff-search-library-in-sexp t
+          helm-scroll-amount 8
+          helm-echo-input-in-header-line nil)
+    :init
+    (helm-mode 1))
+
+  (require 'helm-config)
+  (helm-autoresize-mode 1)
+
+  (use-package helm-flx
+    :ensure
+    :custom
+    (helm-flx-for-helm-find-files t)
+    (helm-flx-for-helm-locate t)
+    :config
+    (helm-flx-mode +1))
+
+  (use-package swiper-helm
+    :ensure
+    :bind
+    ("C-s" . swiper))
+
 *** Counsel
     Ivy backends for a lot more commands
 #+BEGIN_SRC emacs-lisp
 (use-package counsel
+  :disabled t
   :after-call pre-command-hook
   :after ivy
   :chords (("JJ" . counsel-imenu)
            (";'" . counsel-M-x))
-  :defer 0.5
+  ;;:defer 0.5
   :bind
   ((:map read-expression-map
          ("C-r" . counsel-expression-history))
@@ -1287,6 +1384,7 @@ shackle gives you the means to put an end to popped up buffers not behaving they
 ;; Add more ivy features for projectile related commands
 ;; https://github.com/ericdanan/counsel-projectile/tree/master
 (use-package counsel-projectile
+  :disabled t
   :after (counsel projectile)
   :config (counsel-projectile-mode 1))
 
@@ -1297,6 +1395,7 @@ shackle gives you the means to put an end to popped up buffers not behaving they
      amx: An alternative M-x interface for Emacs.
 #+BEGIN_SRC emacs-lisp
 (use-package amx :ensure
+ :disabled t
  :defer 0.5
   :config (amx-mode)
   :custom
@@ -1310,6 +1409,7 @@ shackle gives you the means to put an end to popped up buffers not behaving they
 #+BEGIN_SRC emacs-lisp
 
 (use-package ivy
+  :disabled t
   :bind (("C-c u" . ivy-resume))
   :defer 0.5
   :config
@@ -1341,6 +1441,7 @@ shackle gives you the means to put an end to popped up buffers not behaving they
    ("RET" . ivy-occur-press)))
 
 (use-package ivy-rich
+  :disabled t
   :after ivy
   :custom
   (ivy-virtual-abbreviate 'full
@@ -1356,6 +1457,7 @@ shackle gives you the means to put an end to popped up buffers not behaving they
 #+BEGIN_SRC emacs-lisp
 
 (use-package swiper
+:disabled t
 :after ivy
   :bind (("C-s" . counsel-grep-or-swiper))
   :config
@@ -1369,6 +1471,7 @@ Needed for ivy fuzzy matching.
 
 #+BEGIN_SRC emacs-lisp
 (use-package flx :ensure
+  :disabled t
   :after ivy
   :demand
   :config
@@ -1380,6 +1483,15 @@ Needed for ivy fuzzy matching.
                                  (t . ivy--regex-fuzzy))))
 #+END_SRC
 
+** Password management
+
+Password management using =auth-sources= and =pass= (I normally use 1Password, but I have not found a good command-line/Emacs interface for it, so I am using =pass= for now for some items I need to add to my Emacs config file).
+
+#+begin_src emacs-lisp
+  (require 'auth-source)
+  (require 'auth-source-pass)
+  (auth-source-pass-enable)
+#+end_src
 
 ** Editor
 *** Settings
@@ -1389,6 +1501,7 @@ Needed for ivy fuzzy matching.
        enable-recursive-minibuffers t
        mouse-yank-at-point t)
 
+ (add-hook 'before-save-hook 'time-stamp)
 #+END_SRC
 
 **** Whitespace, indentation & formatting
@@ -1772,19 +1885,10 @@ fundamental-mode) for performance sake."
 *** Rust
 #+BEGIN_SRC emacs-lisp
 (use-package rust-mode
+  :ensure
   :defer
   :mode ("\\.rs" . rust-mode)
 )
-#+END_SRC
-
-*** Go
-#+BEGIN_SRC emacs-lisp
-(use-package go-mode
-  :defer
-  :custom (gofmt-command (substitute-in-file-name "$GOPATH/bin/goimports"))
-  :config
-
-  (add-hook! go-mode (add-hook! :local 'before-save-hook 'gofmt-before-save)))
 #+END_SRC
 
 *** Lisp
@@ -1819,6 +1923,7 @@ fundamental-mode) for performance sake."
 ;    (run-hooks 'gas-lisp-coding-hook))
 
 (use-package clojure-mode
+  :ensure
   :defer
   :mode (("\\.edn$"  . clojurec-mode)
          ("\\.boot$" . clojure-mode)
@@ -1843,6 +1948,7 @@ fundamental-mode) for performance sake."
 )
 
 (use-package eldoc
+  :ensure
   :defer
   :hook
   (prog-mode       . turn-on-eldoc-mode)
@@ -1850,6 +1956,7 @@ fundamental-mode) for performance sake."
 
 (defun zz/sp-enclose-next-sexp (num) (interactive "p") (insert-parentheses (or num 1)))
 (use-package smartparens
+  :ensure
   :defer
   :bind (("M-n" . sp-next-sexp)
          ("M-p" . sp-previous-sexp)
@@ -1879,13 +1986,16 @@ fundamental-mode) for performance sake."
 )
 
 (use-package rainbow-delimiters
+  :ensure
   :hook
   ((prog-mode cider-repl-mode clojure-mode) . rainbow-delimiters-mode))
 
 (use-package clojure-mode-extra-font-locking
+:ensure
 :defer t)
 
 (use-package cider
+  :ensure
   :defer
   :bind  (:map cider-mode-map
            ;;    ("C-c C-v C-c" . cider-send-and-evaluate-sexp)
@@ -1946,12 +2056,14 @@ fundamental-mode) for performance sake."
 (advice-add 'cider-eval-print-last-sexp :before #'ha/cider-append-comment)
 
 ;; cider to work with org-mode
-(use-package ob-clojure
+(use-package ob-clojurescript
+:ensure
 :defer
 :config
 (setq org-babel-clojure-backend 'cider))
 
 (use-package flycheck-clojure
+  :ensure
   :defer t
   :init
   (add-hook 'emacs-startup-hook 'global-flycheck-mode)
@@ -3462,8 +3574,118 @@ session as the current block. ARG has same meaning as in
 #+END_SRC
 
 ** Keybindings
+
+I use the =bind-key= package to more easily keep track and manage user keybindings. =bind-key= comes with =use-package= so we just load it.
+
+The main advantage of using this over =define-key= or =global-set-key= is that you can use ~M-x~ =describe-personal-keybindings= to see a list of all the customized keybindings you have defined.
+*** Miscellaneous keybindings
+
+- =M-g= interactively asks for a line number and jump to it (=goto-line)=.
+
+  #+begin_src emacs-lisp
+    (bind-key "M-g" 'goto-line)
+  #+end_src
+
+- =M-`= focuses the next frame, if multiple ones are active (emulate the Mac "next app window" keybinding)
+
+  #+begin_src emacs-lisp
+    (bind-key "M-`" 'other-frame)
+  #+end_src
+
+- Interactive search key bindings -  [[https://github.com/benma/visual-regexp-steroids.el][visual-regexp-steroids]] provides sane regular expressions and visual incremental search. We make ~C-s~ and ~C-r~ run the visual-regexp functions. We leave ~C-M-s~ and ~C-M-r~ to run the default =isearch-forward/backward= functions, as a fallback. I use the =pcre2el= package to support PCRE-style regular expressions.
+
+  #+begin_src emacs-lisp :tangle no
+    (use-package pcre2el)
+    (use-package visual-regexp-steroids
+      :custom
+      (vr/engine 'pcre2el "Use PCRE regular expressions")
+      :bind
+      ("C-c r" . vr/replace)
+      ("C-c q" . vr/query-replace)
+      ("C-r"   . vr/isearch-backward)
+      ("C-S-s" . vr/isearch-forward)
+      ("C-M-s" . isearch-forward)
+      ("C-M-r" . isearch-backward))
+  #+end_src
+
+
+- Key binding to use "[[http://www.emacswiki.org/emacs/HippieExpand][hippie expand]]" for text autocompletion
+
+  #+begin_src emacs-lisp
+    (bind-key "M-/" 'hippie-expand)
+  #+end_src
+
+ - The [[https://github.com/justbur/emacs-which-key][which-key]] package makes Emacs functionality much easier to discover and explore: in short, after you start the input of a command and stop, pondering what key must follow, it will automatically open a non-intrusive buffer at the bottom of the screen offering you suggestions for completing the command, that's it, nothing else. It's beautiful.
+
+  #+begin_src emacs-lisp
+    (use-package which-key
+      :defer nil
+      :delight which-key-mode
+      :config
+      (which-key-mode))
+  #+end_src
+
+ ** Emulating vi's =%= key
+
+One of the few things I missed in Emacs from vi was the =%= key, which jumps to the parenthesis, bracket or brace which matches the one below the cursor. This function implements the functionality. Inspired by [[http://www.emacswiki.org/emacs/NavigatingParentheses]], but modified to use =smartparens= instead of the default commands, and to work on brackets and braces.
+
+#+begin_src emacs-lisp
+  (defun zz/goto-match-paren (arg)
+    "Go to the matching paren/bracket, otherwise (or if ARG is not nil) insert %.
+    vi style of % jumping to matching brace."
+    (interactive "p")
+    (if (not (memq last-command '(set-mark
+                                  cua-set-mark
+                                  zz/goto-match-paren
+                                  down-list
+                                  up-list
+                                  end-of-defun
+                                  beginning-of-defun
+                                  backward-sexp
+                                  forward-sexp
+                                  backward-up-list
+                                  forward-paragraph
+                                  backward-paragraph
+                                  end-of-buffer
+                                  beginning-of-buffer
+                                  backward-word
+                                  forward-word
+                                  mwheel-scroll
+                                  backward-word
+                                  forward-word
+                                  mouse-start-secondary
+                                  mouse-yank-secondary
+                                  mouse-secondary-save-then-kill
+                                  move-end-of-line
+                                  move-beginning-of-line
+                                  backward-char
+                                  forward-char
+                                  scroll-up
+                                  scroll-down
+                                  scroll-left
+                                  scroll-right
+                                  mouse-set-point
+                                  next-buffer
+                                  previous-buffer
+                                  previous-line
+                                  next-line
+                                  back-to-indentation
+                                  )))
+        (self-insert-command (or arg 1))
+      (cond ((looking-at "\\s\(") (sp-forward-sexp) (backward-char 1))
+            ((looking-at "\\s\)") (forward-char 1) (sp-backward-sexp))
+            (t (self-insert-command (or arg 1))))))
+#+end_src
+
+We bind this function to the =%= key.
+
+#+begin_src emacs-lisp
+  (bind-key "%" 'zz/goto-match-paren)
+#+end_src
+
+
 *** Global keybindings
-;;#+BEGIN_SRC emacs-lisp
+#+BEGIN_SRC emacs-lisp
 ;;(gas-leader
 ;;  :infix "f"
 ;;  ""  '(:ignore t :wk "Files")
@@ -3474,7 +3696,7 @@ session as the current block. ARG has same meaning as in
 ;;  "o" '(ff-find-other-file :wk "Switch header/source")
 ;;  "b" '(hexl-find-file :wk "Open binary")
 ;;  "l" '(find-file-literally :wk "Open literally"))
-;;#+END_SRC
+#+END_SRC
 
 *** Which-key
 
@@ -3500,7 +3722,6 @@ session as the current block. ARG has same meaning as in
          which-key-side-window-slot -10)
   (which-key-mode))
 #+END_SRC
-
 
 ** Final Initialisation
 #+BEGIN_SRC emacs-lisp
