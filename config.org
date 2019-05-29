@@ -534,12 +534,12 @@ called. The buffer to be switched to is current when these hooks run.")
 (unless (package-installed-p 'use-package) ; unless it is already installed
   (package-refresh-contents) ; update packages archive
   (package-install 'use-package); install the latest version of use-package
-  (package-install 'delight))
+  )
 (eval-when-compile
 (require 'use-package)
-(require 'bind-key)
-(require 'delight)
 )
+(use-package delight :ensure t)
+(require 'bind-key)
 ;(setq use-package-always-ensure t)
 
 (use-package use-package-chords :ensure
@@ -1221,6 +1221,7 @@ This config came originally from [[https://github.com/daedreth/UncleDavesEmacs#u
 
 #+begin_src emacs-lisp
   (use-package helm
+    :disabled t
     :ensure
     :defer 1
     :delight helm-mode
@@ -1262,6 +1263,7 @@ This config came originally from [[https://github.com/daedreth/UncleDavesEmacs#u
   (helm-autoresize-mode 1)
 
   (use-package helm-flx
+    :disabled t
     :ensure
     :custom
     (helm-flx-for-helm-find-files t)
@@ -1278,22 +1280,30 @@ This config came originally from [[https://github.com/daedreth/UncleDavesEmacs#u
     Ivy backends for a lot more commands
 #+BEGIN_SRC emacs-lisp
 (use-package counsel
-  :disabled t
+ ;; :disabled t
   :after-call pre-command-hook
   :after ivy
-  :chords (("JJ" . counsel-imenu)
-           (";'" . counsel-M-x))
-  ;;:defer 0.5
-  :bind
-  ((:map read-expression-map
-         ("C-r" . counsel-expression-history))
-   (:map counsel-find-file-map
-         ("<left>" . counsel-up-directory)
-         ("<right>" . counsel-down-directory)))
-
+  :commands (counsel-mode)
+  :defer 0.5
+  :bind  (("C-s" . counsel-grep-or-swiper)
+          ("M-x" . counsel-M-x)
+          ("C-x C-f" . counsel-find-file)
+          ("C-h f" . counsel-describe-function)
+          ("C-h v" . counsel-describe-variable)
+          ("C-h i" . counsel-info-lookup-symbol)
+          ("C-h u" . counsel-unicode-char)
+          ("C-c k" . counsel-rg)
+          ("C-x l" . counsel-locate)
+          ("C-c g" . counsel-git-grep)
+          ("C-c h i" . counsel-imenu)
+          ("C-x p" . counsel-list-processes))
+  (:map read-expression-map
+        ("C-r" . counsel-expression-history))
+  (:map counsel-find-file-map
+        ("<left>" . counsel-up-directory)
+        ("<right>" . counsel-down-directory)))
+  :init (counsel-mode)
   :config
-
-  (counsel-mode)
   (with-eval-after-load 'org-agenda
     (bind-key "C-c C-q" #'counsel-org-tag-agenda org-agenda-mode-map))
 
@@ -1380,15 +1390,6 @@ This config came originally from [[https://github.com/daedreth/UncleDavesEmacs#u
    ("C-c d s" . describe-symbol)
    ("C-c d f" . counsel-faces)
    ("C-c r g" . counsel-rg)))
-
-;; Add more ivy features for projectile related commands
-;; https://github.com/ericdanan/counsel-projectile/tree/master
-(use-package counsel-projectile
-  :disabled t
-  :after (counsel projectile)
-  :config (counsel-projectile-mode 1))
-
-
 #+END_SRC
 
 **** Better ~counsel-M-x~
@@ -1409,17 +1410,12 @@ This config came originally from [[https://github.com/daedreth/UncleDavesEmacs#u
 #+BEGIN_SRC emacs-lisp
 
 (use-package ivy
-  :disabled t
-  :bind (("C-c u" . ivy-resume))
+ ;; :disabled t
+ ;; :bind (("C-c u" . ivy-resume))
+  :delight ivy-mode
   :defer 0.5
   :config
   (ivy-mode)
-
-  (bind-chords
-   :map ivy-minibuffer-map
-   ("m," . ivy-beginning-of-buffer)
-   (",." . ivy-end-of-buffer))
-
   (setq ivy-use-virtual-buffers t
         ivy-height 13
         ivy-count-format "%d/%d "
@@ -1441,7 +1437,7 @@ This config came originally from [[https://github.com/daedreth/UncleDavesEmacs#u
    ("RET" . ivy-occur-press)))
 
 (use-package ivy-rich
-  :disabled t
+ ;; :disabled t
   :after ivy
   :custom
   (ivy-virtual-abbreviate 'full
@@ -1457,9 +1453,14 @@ This config came originally from [[https://github.com/daedreth/UncleDavesEmacs#u
 #+BEGIN_SRC emacs-lisp
 
 (use-package swiper
-:disabled t
+;;:disabled t
 :after ivy
-  :bind (("C-s" . counsel-grep-or-swiper))
+  :bind (("C-r" . swiper)
+         ("C-s" . counsel-grep-or-swiper)
+         ("C-c C-r" . ivy-resume)
+         ("C-S-s" . isearch-forward)
+         ("C-x b" . ivy-switch-buffer)
+         ("C-c u" . swiper-all))
   :config
   (setq swiper-action-recenter t
         ;; Jump to the beginning of match when leaving Swiper
@@ -1583,22 +1584,11 @@ Password management using =auth-sources= and =pass= (I normally use 1Password, b
   (bookmark-save-flag t))
 #+END_SRC
 
-*** Swiper
-#+BEGIN_SRC emacs-lisp
-(use-package swiper :ensure
-  :bind (("C-r" . swiper)
-	       ("C-s" . counsel-grep-or-swiper)
-         ("C-S-s" . isearch-forward))
-  :config
-  (add-to-list 'swiper-font-lock-exclude 'c-mode)
-  (add-to-list 'swiper-font-lock-exclude 'c++-mode))
-#+END_SRC
-
 *** Company
 #+BEGIN_SRC emacs-lisp
 (use-package company :ensure
   :after-call (pre-command-hook after-find-file dired-before-readin-hook)
-  :bind ("C-:" . company-complete)  ; In case I don't want to wait
+  :bind ("C-<tab>" . company-complete)  ; In case I don't want to wait
   :config
   (setq! company-idle-delay nil
          company-tooltip-limit 15
@@ -1629,23 +1619,15 @@ Password management using =auth-sources= and =pass= (I normally use 1Password, b
                                                 'doc-view-mode)))
   (setq! company-dabbrev-ignore-buffers #'gas-company-dabbrev-buffer-check))
 
-;;(use-package company-box
-;; :defer
-;; :after company
-;; :hook (company-mode . company-box-mode))
+(use-package company-box
+ :defer
+ :after company
+ :hook (company-mode . company-box-mode))
 
 #+END_SRC
 
 *** Projects
 #+BEGIN_SRC emacs-lisp
-
-(use-package ggtags
- :defer
- :config
-  (add-hook 'c-mode-common-hook
-          (lambda ()
-            (when (derived-mode-p 'c-mode 'c++-mode 'java-mode 'asm-mode)
-              (ggtags-mode 1)))))
 
 (use-package projectile :ensure
   :after-call (pre-command-hook after-find-file dired-before-readin-hook)
@@ -2133,7 +2115,8 @@ fundamental-mode) for performance sake."
 *** Base configuration
 #+BEGIN_SRC emacs-lisp
 (use-package org
- :ensure
+ :ensure t
+ :mode ("\\.org\\'" . org-mode)
  :init
        (font-lock-add-keywords 'org-mode
         '(("^ +\\([-*]\\) "
@@ -2142,6 +2125,10 @@ fundamental-mode) for performance sake."
          ("C-c c" . org-capture)
          ("C-M-|" . indent-rigidly)
          ("C-c a" . org-agenda)
+         ("C-c b" . org-iswitchb)
+         ("C-c C-w" . org-refile)
+         ("C-c j" . org-clock-goto)
+         ("C-c C-x C-o" . org-clock-out)
          ("C-M-|" . indent-rigidly)
          :map org-mode-map
          ("M-n" . outline-next-visible-heading)
@@ -2151,7 +2138,6 @@ fundamental-mode) for performance sake."
          ("C-s-f" . forward-sentence)
          ("C-s-b" . backward-sentence)
         )
-
   :config
   (setq! org-modules '(org-habit org-id org-protocol org-timer org-bullets))
   (use-package org-bullets
@@ -2363,19 +2349,6 @@ _n_: note          _c_: clojure
 (add-hook 'org-babel-after-execute-hook 'org-redisplay-inline-images)
 #+END_SRC
 
-***** Octave
-#+BEGIN_SRC emacs-lisp
-(use-package ob-octave
-  :config
-  ;; NOTE(gas): Remove whitespace from beginning when printing output
-  (defun gas*org-babel-octave-trim-output (orig-func session body result-type &optional matlabp)
-    (let ((result (funcall orig-func session body result-type matlabp)))
-      (if (eq result-type 'output)
-          (string-trim-left result)
-        result)))
-  (advice-add 'org-babel-octave-evaluate-session :around 'gas*org-babel-octave-evaluate-session))
-#+END_SRC
-
 ***** Sessions
 #+BEGIN_SRC emacs-lisp
 (defun +babel-get-src-info ()
@@ -2475,7 +2448,7 @@ session as the current block. ARG has same meaning as in
 #+BEGIN_SRC emacs-lisp
 ) ;; use-package
 
-(use-package org-element :commands org-element-update-syntax)
+;;(use-package org-element :commands org-element-update-syntax)
 #+END_SRC
 
 *** Agenda
@@ -2487,16 +2460,17 @@ session as the current block. ARG has same meaning as in
     (when (directory-files org-directory nil "sync-conflict")
       (message-box "CONSEIL: Il y a des conflits de synchronisation!")))
   (add-hook 'org-agenda-finalize-hook #'+agenda|check-sync-conflicts)
-
-  (general-def :keymaps 'org-agenda-mode-map "P" #'+agenda/toggle-private)
-
   (setq!
    org-agenda-custom-commands
    '(("n" "Ordre de jour"
-      ((agenda "" ((org-agenda-files (list org-default-notes-file gas-org-agenda-file))
-                   (org-agenda-span 4)))
-       (+agenda-inbox nil ((org-agenda-files (list org-default-notes-file))))
-       (+agenda-tasks))))
+      ((tags-todo "@important"
+                  ((org-agenda-overriding-header "Tâches hautement importante")))
+       (tags-todo "@urgent"
+                  ((org-agenda-overriding-header "Tâches à faible priorité")))
+       (tags-todo "TODO/!@urgent"
+                  ((org-agenda-overriding-header "Tâches isolées")))
+       (tags-todo "ATTENTE"
+                  ((org-agenda-overriding-header "Tâches en attente"))))))
 
    org-agenda-prefix-format '((agenda . "  %?-12t% s"))
    org-agenda-skip-deadline-prewarning-if-scheduled 'pre-scheduled
@@ -2513,7 +2487,7 @@ session as the current block. ARG has same meaning as in
    org-agenda-block-separator ""
    org-agenda-time-grid '((daily today require-timed) nil "......" "----------------"))
 
-  (add-hook 'org-agenda-mode-hook 'gas|org-offer-all-agenda-tags)
+;;  (add-hook 'org-agenda-mode-hook 'gas|org-offer-all-agenda-tags)
 #+END_SRC
 **** Org-GTD
 #+BEGIN_SRC emacs-lisp
@@ -2531,422 +2505,10 @@ session as the current block. ARG has same meaning as in
 ;;(add-hook 'org-agenda-mode-hook (lambda () (org-gcal-sync) ))
 
 #+END_SRC
-**** Entry
-#+BEGIN_SRC emacs-lisp
-(cl-defstruct +agenda-entry todo priority text tags planned low-effort marker project-status children)
-
-(defun +agenda-entry (headline &optional tags)
-  (let ((todo-type (org-element-property :todo-type headline))
-        (effort (org-element-property :EFFORT headline)))
-    (make-+agenda-entry
-     :todo (org-element-property :todo-keyword headline)
-     :priority (org-element-property :priority headline)
-     :text (org-element-property :raw-value headline)
-     :tags (or tags (org-element-property :tags headline))
-     :low-effort (and effort (eq todo-type 'todo) (< (org-duration-to-minutes effort) 20))
-     :marker (org-agenda-new-marker (org-element-property :begin headline)))))
-#+END_SRC
-
-**** Renderer
-#+BEGIN_SRC emacs-lisp
-(defconst +agenda-projects-not-task-faces '(("PROCHAINE" . '(:inherit org-todo :weight normal))
-                                            ("TODO" . '(:inherit org-todo :weight normal))))
-
-(defconst +agenda-projects-task-faces '(("PROCHAINE" . '(:inherit org-todo :weight bold))
-                                        ("TODO" . '(:inherit org-todo :weight bold))))
-
-(defun +agenda-format-entry (prefix entry)
-  (let ((props (list 'gas-custom-agenda t
-                     'mouse-face 'highlight
-                     'undone-face nil
-                     'done-face 'org-agenda-done
-                     'org-marker (+agenda-entry-marker entry)
-                     'org-hd-marker (+agenda-entry-marker entry)
-                     'todo-state (+agenda-entry-todo entry)
-                     'org-todo-regexp org-todo-regexp
-                     'org-not-done-regexp org-not-done-regexp
-                     'org-complex-heading-regexp org-complex-heading-regexp
-                     'org-highest-priority org-highest-priority
-                     'org-lowest-priority org-lowest-priority
-	                 'tags (mapcar 'org-downcase-keep-props (+agenda-entry-tags entry))
-	                 'format `(() ,prefix)))
-        (text
-         (concat prefix
-                 (if (+agenda-entry-todo entry)
-                     (concat (+agenda-entry-todo entry) " ")
-                   "")
-                 (if (+agenda-entry-priority entry)
-                     (string ?\[ ?# (+agenda-entry-priority entry) ?\] ? )
-                   "")
-                 (+agenda-entry-text entry)
-                 (if (+agenda-entry-tags entry)
-                     (concat " :" (mapconcat #'identity (+agenda-entry-tags entry) ":") ":")
-                   ""))))
-
-	(add-text-properties (length prefix) (length text) '(org-heading t) text)
-    (setq text (concat (org-add-props text props) "\n"))
-    (org-agenda-highlight-todo text)))
-
-(defun +agenda-tip-for-effort (text low-effort &optional alt-text)
-  (if low-effort
-      (propertize text 'face '(:foreground "#b58900"))
-    (or alt-text text)))
-
-(defun +agenda-project-get-prefix (taskp parent-continuations &optional low-effort)
-  ;; IMPORTANT(gas): `parent-continuations' is in reverse order!
-  (let ((prefix "")
-        (tip t))
-    (if taskp
-        (dolist (cont parent-continuations)
-          (setq prefix (concat (if tip
-                                   (+agenda-tip-for-effort (if cont "├⮞ " "╰⮞ ") low-effort)
-                                 (if cont "│  " "   "))
-                        prefix)
-                tip nil))
-
-      (dolist (cont parent-continuations)
-        (setq prefix (concat (if tip (if cont "├─╴" "╰─╴") (if cont "│  " "   ")) prefix)
-              tip nil)))
-    (concat "  " prefix)))
-
-(defun +agenda-priority-sort (a b)
-  (let ((pa (or (+agenda-entry-priority a) ?B))
-        (pb (or (+agenda-entry-priority b) ?B)))
-    (< pa pb)))
-
-(defun +agenda-flatten-list (l)
-  (cond ((not l) nil)
-        ((atom l) (list l))
-        (t (append (+agenda-flatten-list (car l)) (+agenda-flatten-list (cdr l))))))
-
-(defun +agenda-project-printer (list &optional parent-continuations)
-  (setq list (sort list #'+agenda-priority-sort))
-
-  (if parent-continuations
-      (while list
-        (let ((entry (car list)))
-          (unless (cdr list) (setf (car parent-continuations) nil))
-
-          (when (eq (+agenda-entry-project-status entry) 'stuck)
-            (org-add-props (+agenda-entry-text entry) nil 'face 'org-priority))
-
-
-          (let ((org-todo-keyword-faces (if (+agenda-entry-project-status entry)
-                                            +agenda-projects-not-task-faces
-                                          +agenda-projects-task-faces)))
-            (insert
-             (+agenda-format-entry
-              (+agenda-project-get-prefix (not (+agenda-entry-project-status entry)) parent-continuations
-                                          (+agenda-entry-low-effort entry))
-              entry)))
-
-          (+agenda-project-printer (+agenda-entry-children entry) (cons t parent-continuations)))
-        (setq list (cdr list)))
-
-    (let ((first t)
-          (org-todo-keyword-faces +agenda-projects-not-task-faces))
-      (dolist (entry list)
-        (if first (setq first nil) (insert "\n"))
-
-        (when (eq (+agenda-entry-project-status entry) 'stuck)
-          (org-add-props (+agenda-entry-text entry) nil 'face 'org-priority))
-        (insert (+agenda-format-entry "  " entry))
-
-        (+agenda-project-printer (+agenda-entry-children entry) (list t))))))
-
-(defun +agenda-simple-printer (list)
-  (setq list (sort list #'+agenda-priority-sort))
-  (dolist (entry list)
-    (insert
-     (+agenda-format-entry (+agenda-tip-for-effort " ⮞" (+agenda-entry-low-effort entry) "  ") entry))))
-
-(defun +agenda-separator ()
-  (unless (or (bobp) org-agenda-compact-blocks
-			  (not org-agenda-block-separator))
-	(insert "\n"
-            (if (stringp org-agenda-block-separator)
-                org-agenda-block-separator
-			  (make-string (window-width) org-agenda-block-separator))
-		    "\n")))
-
-(defun +agenda-render-block (data title &optional printer)
-  (when data
-    (let ((begin (point)))
-      (+agenda-separator)
-      (insert (org-add-props title nil 'face 'org-agenda-structure) "\n")
-      (funcall (or printer #'+agenda-simple-printer) data)
-      (add-text-properties begin (point-max) `(org-agenda-type tags)))))
-#+END_SRC
-
-**** Inbox
-#+BEGIN_SRC emacs-lisp
-(defun +agenda-inbox-process-headline (headline)
-  (when (or +agenda-show-private
-            (not (member "PRIVATE" (org-element-property :tags headline))))
-    (+agenda-entry headline)))
-
-(defun +agenda-inbox (&optional _)
-  (catch 'exit
-    (let ((files (org-agenda-files nil 'ifmode))
-          +agenda-inbox
-          org-todo-regexp org-not-done-regexp org-complex-heading-regexp org-done-keywords
-          org-done-keywords-for-agenda file buffer ast)
-      (while (setq file (pop files))
-        (org-check-agenda-file file)
-        (setq buffer (if (file-exists-p file)
-                         (org-get-agenda-file-buffer file)
-                       (error "Ce fichier n'existe pas %s" file)))
-
-        (unless org-todo-regexp
-          (dolist (variable '(org-todo-regexp org-not-done-regexp org-complex-heading-regexp
-                                              org-done-keywords org-done-keywords-for-agenda))
-            (set variable (buffer-local-value variable buffer))))
-
-        (with-current-buffer buffer
-          (org-with-wide-buffer
-           (unless (derived-mode-p 'org-mode) (error "Fichier de Agenda %s ce n'est pas de Org mode" file))
-           (setq ast (org-element-parse-buffer 'headline))
-           (setq +agenda-inbox
-                 (append (org-element-map ast 'headline #'+agenda-inbox-process-headline nil nil 'headline)
-                         +agenda-inbox)))))
-
-      (let ((inhibit-read-only t))
-	    (goto-char (point-max))
-        (+agenda-render-block +agenda-inbox "Tâches Courante")))))
-#+END_SRC
-
-**** Tasks
-#+BEGIN_SRC emacs-lisp
-(defvar +agenda-level)
-(defvar +agenda-parent-tags)
-(defvar +agenda-project-status)
-(defvar +agenda-projects)
-(defvar +agenda-isolated-tasks)
-(defvar +agenda-high-priority)
-(defvar +agenda-low-priority)
-(defvar +agenda-archivable-tasks)
-(defvar +agenda-planned-tasks)
-(defvar +agenda-hold-tasks)
-
-(defun +agenda-filter-priorities (entry)
-  (let ((priority (+agenda-entry-priority entry)))
-    (cond ((eq priority ?A) (push entry +agenda-high-priority))
-          ((eq priority ?C) (push entry +agenda-low-priority)))))
-
-(defmacro +agenda-process-children (parent &optional task-children)
-  (if task-children
-      `(let ((+agenda-parent-tags (append (org-element-property :tags ,parent) +agenda-parent-tags))
-             (+agenda-level (1+ +agenda-level)))
-         (org-element-map (org-element-contents ,parent) 'headline
-           #'+agenda-tasks-process-headline nil nil 'headline))
-    `(let ((+agenda-parent-tags (append (org-element-property :tags ,parent) +agenda-parent-tags)))
-       (org-element-map (org-element-contents ,parent) 'headline #'+agenda-tasks-process-headline
-                        nil nil 'headline))))
-
-(defmacro +agenda-set-parent-minimum-status (status)
-  `(unless (= +agenda-level 0)
-     ,(if (symbolp status)
-          (cond ((eq status 'next)    '(setq +agenda-project-status 'next))
-                ((eq status 'planned) '(when (not (eq +agenda-project-status 'next))
-                                         (setq +agenda-project-status 'planned)))
-                (t '(unless +agenda-project-status (setq +agenda-project-status 'stuck))))
-        `(cond ((eq ,status 'next)     (setq +agenda-project-status 'next))
-               ((eq ,status 'planned)  (when (not (eq +agenda-project-status 'next))
-                                         (setq +agenda-project-status 'planned)))
-               (t (unless +agenda-project-status (setq +agenda-project-status 'stuck)))))))
-
-(defun +agenda-tasks-process-headline (headline)
-  (let* ((todo (org-element-property :todo-keyword headline))
-         (todo-type (org-element-property :todo-type headline))
-         (scheduled-ts (org-element-property :raw-value (org-element-property :scheduled headline)))
-         (deadline-ts  (org-element-property :raw-value (org-element-property :deadline headline)))
-         (closed-ts  (org-element-property :raw-value (org-element-property :closed headline)))
-         (has-scheduling (or scheduled-ts deadline-ts))
-         (scheduled-future (cond (scheduled-ts (> (org-time-stamp-to-now scheduled-ts) 0))
-                                 (deadline-ts  (> (org-time-stamp-to-now deadline-ts)
-                                                  (org-get-wdays deadline-ts)))))
-         (scheduled-past-or-now (and has-scheduling (not scheduled-future)))
-         (effort (org-element-property :EFFORT headline))
-         (contents-begin (org-element-property :contents-begin headline))
-         entry project-status return)
-
-    (setq entry (+agenda-entry headline (cl-remove-duplicates (append (org-element-property :tags headline)
-                                                                      +agenda-parent-tags)
-                                                              :test 'string=)))
-
-    (when (or +agenda-show-private
-              (not (member "PRIVATE" (org-element-property :tags headline))))
-      (if (not todo-type)
-          (unless (member "TICKLER" (org-element-property :tags headline))
-            (let* ((timestamp (or scheduled-ts deadline-ts))
-                   (time-to-now (and timestamp (org-time-stamp-to-now timestamp)))
-                   first-child search-bound temp-time)
-
-              ;; NOTE(gas): Find the most recent active timestamp
-              (when (and (not time-to-now) contents-begin)
-                (setq first-child (org-element-map (org-element-contents headline) 'headline #'identity
-                                                   nil t 'headline)
-                      search-bound (or (and first-child (org-element-property :begin first-child))
-                                       (org-element-property :end headline)))
-                (goto-char contents-begin)
-                (while (re-search-forward org-ts-regexp search-bound t)
-                  (setq temp-time (org-time-stamp-to-now (match-string 1)))
-                  (when (or (not time-to-now) (> temp-time time-to-now))
-                    (setq time-to-now temp-time))))
-
-              (if (and time-to-now (< time-to-now -60))
-                  ;; NOTE(gas): This headline without todo keyword has a timestamp that is
-                  ;; more than two months old.
-                  (push entry +agenda-archivable-tasks)
-
-                ;; NOTE(gas): Just process the children of this headline without todo keyword
-                (setq return (+agenda-process-children headline)))))
-
-        (+agenda-set-parent-minimum-status 'stuck)
-
-        (if (or (eq todo-type 'done)
-                (string= (org-element-property :STYLE headline) "habit"))
-            ;; NOTE(gas): Archive all tasks that have been done for longer than 2 months
-            (when (and (eq todo-type 'done)
-                       (or (not closed-ts)
-                           (< (org-time-stamp-to-now closed-ts) -60)))
-              (push entry +agenda-archivable-tasks))
-
-          (cond
-           ;; NOTE(gas): Planned
-           ((and (not (string= todo "PROCHAINE")) scheduled-future)
-            (setf (+agenda-entry-planned entry) t)
-            (if (= +agenda-level 0)
-                (push entry +agenda-planned-tasks)
-              (+agenda-set-parent-minimum-status 'planned)
-              (setq return entry)))
-
-           ;; NOTE(gas): Hold
-           ((or (string= todo "SUSPENDUE") (string= todo "ATTENTE"))
-            (push entry +agenda-hold-tasks))
-
-           (t
-            ;; NOTE(gas): Process children
-            (let* ((+agenda-project-status nil)
-                   (children (+agenda-flatten-list (+agenda-process-children headline t)))
-                   tail prev)
-              (setq project-status +agenda-project-status)
-
-              ;; NOTE(gas): When this project is not planned, we need to remove its
-              ;; planned tasks and insert them in the planned list
-              ;; IMPORTANT(gas): A project that is stuck doesn't have any planned children
-              ;; so, for this check, not planned ≡ next
-              (when (eq project-status 'next)
-                (setq tail children)
-                (while tail
-                  (if (or (+agenda-entry-planned (car tail))
-                          (eq (+agenda-entry-project-status (car tail)) 'planned))
-                      (progn
-                        (push (car tail) +agenda-planned-tasks)
-                        (if prev
-                            (setcdr prev (cdr tail))
-                          (setq children (cdr tail))))
-                    (setq prev tail))
-                  (setq tail (cdr tail))))
-
-              (setf (+agenda-entry-project-status entry) project-status
-                    (+agenda-entry-children entry) children))
-
-            ;; NOTE(gas): Update parent project status
-            (unless (or (= +agenda-level 0) (eq +agenda-project-status 'next))
-              (if project-status
-                  (when (memq project-status '(next planned)) (setq +agenda-project-status project-status))
-                (when (or (string= todo "PROCHAINE") scheduled-past-or-now)
-                  (setq +agenda-project-status 'next))))
-
-            (if project-status
-                (if (and (eq project-status 'planned) (= +agenda-level 0))
-                    (push entry +agenda-planned-tasks)
-                  (setq return entry))
-
-              (if (= +agenda-level 0)
-                  (unless (+agenda-filter-priorities entry)
-                    (when (or (not has-scheduling) (and (string= todo "PROCHAINE")
-                                                        scheduled-future))
-                      (push entry +agenda-isolated-tasks)))
-
-                (when (or (string= todo "PROCHAINE") scheduled-past-or-now) (setq return entry))))))))
-      return)))
-
-(defun +agenda-tasks (&optional _)
-  (catch 'exit
-    (let ((files (org-agenda-files nil 'ifmode))
-          +agenda-projects +agenda-isolated-tasks +agenda-high-priority
-          +agenda-low-priority +agenda-planned-tasks +agenda-hold-tasks
-          +agenda-archivable-tasks
-          org-todo-regexp org-not-done-regexp org-complex-heading-regexp org-done-keywords
-          org-done-keywords-for-agenda file buffer ast)
-      (while (setq file (pop files))
-        (org-check-agenda-file file)
-        (setq buffer (if (file-exists-p file)
-                         (org-get-agenda-file-buffer file)
-                       (error "Ce fichier n'existe pas %s" file)))
-
-        (unless org-todo-regexp
-          (dolist (variable '(org-todo-regexp org-not-done-regexp org-complex-heading-regexp
-                                              org-done-keywords org-done-keywords-for-agenda))
-            (set variable (buffer-local-value variable buffer))))
-
-        (with-current-buffer buffer
-          (org-with-wide-buffer
-           (unless (derived-mode-p 'org-mode) (error "Fichier de Agenda  %s ce n'est pas de Org mode" file))
-           (setq ast (org-element-parse-buffer 'headline))
-           (let ((+agenda-level 0)
-                 +agenda-parent-tags)
-             (setq +agenda-projects
-                   (append
-                    (+agenda-flatten-list
-                     (org-element-map ast 'headline #'+agenda-tasks-process-headline nil nil 'headline))
-                           +agenda-projects))))))
-
-      (let ((inhibit-read-only t))
-	    (goto-char (point-max))
-            (+agenda-render-block (nreverse +agenda-high-priority)    "Tâches hautement importante")
-        (+agenda-render-block +agenda-projects                    "Projets" #'+agenda-project-printer)
-        (+agenda-render-block (nreverse +agenda-isolated-tasks)   "Tâches isolées")
-        (+agenda-render-block (nreverse +agenda-low-priority)     "Tâches à faible priorité")
-        (+agenda-render-block (nreverse +agenda-archivable-tasks) "Tâches à archiver")
-        (+agenda-render-block (nreverse +agenda-planned-tasks)    "Tâches prévues")
-        (+agenda-render-block (nreverse +agenda-hold-tasks)       "Tâches en attente")))))
-#+END_SRC
-
-**** Private information
-#+BEGIN_SRC emacs-lisp
-(defvar +agenda-show-private t
-  "If non-nil, show sensitive information on the agenda.")
-
-(defun +agenda/toggle-private ()
-  (interactive)
-  (setq +agenda-show-private (not +agenda-show-private))
-  (when  (equal major-mode 'org-agenda-mode) (org-agenda-redo))
-  (message "Tâches privées: %s" (if +agenda-show-private "Shown" "Hidden")))
-#+END_SRC
-
-**** Compatibility with their functions
-#+BEGIN_SRC emacs-lisp
-(defun +agenda*change-all-lines-fixface (newhead hdmarker &optional fixface just-this)
-  (when (org-get-at-bol 'gas-custom-agenda)
-    (let ((inhibit-read-only t))
-	  (add-text-properties (point-at-bol) (point-at-eol) '(face nil)))))
-(advice-add 'org-agenda-change-all-lines :before '+agenda*change-all-lines-fixface)
-#+END_SRC
 
 **** End
 #+BEGIN_SRC emacs-lisp
 ) ;; use-package
-#+END_SRC
-
-*** Attach
-#+BEGIN_SRC emacs-lisp
-(use-package org-attach
-  :config
-  (setq! org-attach-directory "Ressources/attacher/"
-         org-attach-method 'mv))
 #+END_SRC
 
 *** Capture
@@ -2960,31 +2522,26 @@ session as the current block. ARG has same meaning as in
     (org-capture))
 
   :config
-  (defun gas-org-capture-add-created-property ()
-    (org-set-property "CREATED" (format-time-string
-                                 (concat "[" (substring (cdr org-time-stamp-formats) 1 -1) "]"))))
-  (add-hook 'org-capture-before-finalize-hook 'gas-org-capture-add-created-property)
-
   (setq!
-   org-capture-templates '(
-			   ("t" "T" entry (file "")
-                            "* PROCHAINE %i%?" :clock-in t :clock-resume t)
-			   ("r" "respond" entry (file "~/org/gtd/inbox.org")
-			    "* PROCHAINE Respond to %:from on %:subject :@bureau:\nSCHEDULED: %t\n%U\n%a\n" :clock-in t :clock-resume t :immediate-finish t)
-			   ("c" "Calendrier" entry (file "")
-                            "* %?\n%^t")
-			   ("n" "Remarque" entry (file "")
-                            "* %?" :clock-in t :clock-resume t)
-                     ("j" "Journal" entry (file+olp+datetree gas-org-journal-file)
-                     ("m" "Meeting" entry (file "~/org/gtd/calendars/atea-cal.org")
-  		      "* RÉUNION with %? :RÉUNION:@bureau:\n%U" :clock-in t :clock-resume t)
-		           ("p" "Phone call" entry (file+headline "~/org/gtd/atea.org" "Interruptions")
-			    "* TÉLÉPHONE %? :TÉLÉPHONE:@bureau:\n%U" :clock-in t :clock-resume t)
-			   ("h" "Habit🙈" entry (file "~/org/gtd/atea.org")
-			    "* TODO %?\n%U\n%a\nSCHEDULED: %(format-time-string \"%<<%Y-%m-%d %a .+1d/3d>>\")\n:PROPERTIES:\n:STYLE: habit\n:REPEAT_TO_STATE: PROCHAINE\n:END:\n")
-                     ("w" "Web bookmark" entry (file "")
-                      "* [[%:link][%^{Title|%:description}]]\n%?" :clock-in t :clock-resume t))
-		     ))
+   org-capture-templates
+      '(("t" "T" entry (file "")
+         "* PROCHAINE %i%?" :clock-in t :clock-resume t)
+        ("r" "respond" entry (file "~/org/gtd/inbox.org")
+         "* PROCHAINE Respond to %:from on %:subject :@bureau:\nSCHEDULED: %t\n%U\n%a\n" :clock-in t :clock-resume t :immediate-finish t)
+        ("c" "Calendrier" entry (file "")
+         "* %?\n%^t")
+        ("n" "Remarque" entry (file "")
+         "* %?" :clock-in t :clock-resume t)
+        ("j" "Journal" entry (file+olp+datetree gas-org-journal-file))
+        ("m" "Meeting" entry (file "~/org/gtd/calendars/atea-cal.org")
+         "* RÉUNION with %? :RÉUNION:@bureau:\n%U" :clock-in t :clock-resume t)
+        ("p" "Phone call" entry (file+headline "~/org/gtd/atea.org" "Interruptions")
+         "* TÉLÉPHONE %? :TÉLÉPHONE:@bureau:\n%U" :clock-in t :clock-resume t)
+        ("h" "Habit🙈" entry (file "~/org/gtd/atea.org")
+         "* TODO %?\n%U\n%a\nSCHEDULED: %(format-time-string \"%<<%Y-%m-%d %a .+1d/3d>>\")\n:PROPERTIES:\n:STYLE: habit\n:REPEAT_TO_STATE: PROCHAINE\n:END:\n")
+        ("w" "Web bookmark" entry (file "")
+         "* [[%:link][%^{Title|%:description}]]\n%?" :clock-in t :clock-resume t))
+      ))
 
   (add-hook 'org-capture-mode-hook 'gas|org-offer-all-agenda-tags)
 
@@ -3010,7 +2567,6 @@ session as the current block. ARG has same meaning as in
      (when (frame-parameter nil 'org-capture-frame)
        (org-save-all-org-buffers)
        (delete-frame))))
-)
 #+END_SRC
 
 *** Clocking
@@ -3036,27 +2592,6 @@ session as the current block. ARG has same meaning as in
          org-habit-today-glyph ?@))
 #+END_SRC
 
-*** IDs
-#+BEGIN_SRC emacs-lisp
-(use-package org-id
-  :config
-  (setq! org-id-link-to-org-use-id 'create-if-interactive
-         org-id-locations-file (concat gas-cache-dir "org-id-locations")))
-#+END_SRC
-
-*** Org Noter
-#+BEGIN_SRC emacs-lisp
-(use-package org-noter :ensure
-;;  :general
-;;  (gas-local-leader :keymaps 'org-mode-map
-;;    "n" '(org-noter :wk "Org Noter"))
-
-  :config
-  (setq! org-noter-default-heading-title "Notes de page $p$"
-         org-noter-default-notes-file-names '("notes.org" "Notes.org")
-         org-noter-hide-other t))
-#+END_SRC
-
 *** Source blocks
 #+BEGIN_SRC emacs-lisp
 (use-package org-src
@@ -3069,329 +2604,7 @@ session as the current block. ARG has same meaning as in
 #+END_SRC
 
 ** Tools and utilities
-*** Compilation
-#+BEGIN_SRC emacs-lisp
-(use-package compile
- ;; :general
- ;; (gas-leader "c" '(+compile :wk "Compile"))
- ;; ("M-g n" '(gas@error/next-error :wk "Next error")
- ;;  "M-g p" '(gas@error/previous-error :wk "Previous error"))
-
-  :config
-  (defhydra gas@error ()
-    "Errors"
-    ("f" first-error "First")
-    ("n" next-error "Next")
-    ("p" previous-error "Previous")
-    ("c" +compile "Recompile")
-    ("q" nil "Quit"))
-
-  (setq!
-   compilation-ask-about-save nil
-   compilation-always-kill t
-   compilation-scroll-output 'first-error
-   compilation-context-lines 2
-   compilation-environment '("TERM=xterm"))
-
-  (cl-defstruct +compile-info type path last-args last-time buffer-name should-close)
-  (defvar-local +compile-info nil)
-  (defvar +compile-info-table (make-hash-table :test 'equal))
-
-  (defconst +compile-sh-names (if (eq system-type 'windows-nt)
-                                  '("build-gas.bat" "build.bat")
-                                '("build-gas.sh" "build.sh")))
-  (defconst +compile-makefile-names '("makefile" "Makefile"))
-  (defconst +compile-script-names (append +compile-sh-names +compile-makefile-names))
-
-  (defun +compile-buffer-name (arg)
-    ;; NOTE(gas): This serves  2 purposes: one is creating the  buffer name itself, called
-    ;; from gas/compile  with arg  = info;  the other  is returning  the buffer  name when
-    ;; called  from compilation-start,  which  is  returned from  the  local  info in  the
-    ;; compilation buffer.
-    (if +compile-info (+compile-info-buffer-name +compile-info)
-      (let ((project-name (projectile-project-name)))
-        (if project-name
-            (format "*[%s] - Compile %s*" project-name (file-name-nondirectory (+compile-info-path arg)))
-          (format "*Compile %s*" (+compile-info-path arg))))))
-
-  (defun +compile (arg)
-    (interactive "P")
-    (let ((default-script (when +compile-info (cons (+compile-info-path +compile-info)
-                                                    +compile-info)))
-          (start-file-name (or (buffer-file-name) ""))
-          script script-list buffer)
-      (dolist (test-script +compile-script-names (setq script-list (nreverse script-list)))
-        (let ((found-script-dir (locate-dominating-file default-directory test-script))
-              full-path info)
-          (when found-script-dir
-            (setq full-path (expand-file-name test-script found-script-dir)
-                  info
-                  (or
-                   (gethash full-path +compile-info-table)
-                   (make-+compile-info :type (if (member test-script +compile-makefile-names) 'make 'sh)
-                                       :path full-path
-                                       :last-time '(0 0 0 0))))
-
-            (push (cons (+compile-info-path info) info) script-list)
-            (when (and (not +compile-info)
-                       (or (not default-script) (time-less-p (+compile-info-last-time (cdr default-script))
-                                                             (+compile-info-last-time info))))
-              (setq default-script (car script-list))))))
-
-      (if (not script-list)
-          (error "No build script found")
-        (if (or (not arg) (= (length script-list) 1))
-            (setq script (cdr default-script))
-          (setq script (cdr (assoc
-                             (completing-read "Which build script? "
-                                              script-list nil t nil nil (car default-script))
-                             script-list))))
-
-        (setf (+compile-info-buffer-name script) (+compile-buffer-name script))
-        (setq buffer (get-buffer-create (+compile-info-buffer-name script)))
-
-        (if (projectile-project-p) (projectile-save-project-buffers) (save-some-buffers t))
-
-        (if (= (length (window-list)) 1)
-            (setf (+compile-info-should-close script) t)
-          (unless (get-buffer-window buffer) (setf (+compile-info-should-close script) nil)))
-
-        (with-current-buffer buffer
-          (cd (file-name-directory (+compile-info-path script)))
-          (let (command command-args)
-            (if (eq (+compile-info-type script) 'make)
-                (setq command "make"
-                      command-args (or (+compile-info-last-args script) "-k"))
-
-              (setq command (shell-quote-argument
-                             (concat "./" (file-name-nondirectory (+compile-info-path script))))
-                    command-args (or (+compile-info-last-args script) "%f")))
-
-            (when arg (setq command-args (read-string "Arguments: " command-args)))
-
-            (setf (+compile-info-last-args script) command-args)
-            (setq command-args (replace-regexp-in-string
-                                (regexp-quote "%f") (shell-quote-argument start-file-name) command-args))
-
-            (setq +compile-info script)
-
-            (setf (+compile-info-last-time script) (current-time))
-            (compilation-start (concat command " " command-args) nil '+compile-buffer-name)
-            ;; NOTE(gas): Need to set it again in order to persist after changing the
-            ;; major mode
-            (setq +compile-info script)))
-
-        (puthash (+compile-info-path script) script +compile-info-table))))
-
-  (defun +compile|bury-buffer (buffer string)
-    "Bury compilation buffer if it succeeded."
-    (with-current-buffer buffer
-      (when +compile-info
-        (message "Compilation time: %.3fs"
-                 (float-time (time-subtract (current-time) (+compile-info-last-time +compile-info))))
-        (when (and (string= string "finished\n")
-                   (save-excursion (not (ignore-errors (compilation-next-error 1 nil 1)))))
-          (let ((windows (get-buffer-window-list buffer t)))
-            (dolist (window windows)
-              (if (and (> (length (window-list (window-frame window))) 1)
-                       (+compile-info-should-close +compile-info))
-                  (delete-window window)
-                (switch-to-prev-buffer window))))
-          (bury-buffer buffer)))))
-  (add-hook 'compilation-finish-functions '+compile|bury-buffer)
-
-  (defun +compile|ansi-color-apply ()
-    "Applies ansi codes to the compilation buffers. Meant for `compilation-filter-hook'."
-    (with-silent-modifications
-      (ansi-color-apply-on-region compilation-filter-start (point))))
-  (add-hook! 'compilation-filter-hook #'+compile|ansi-color-apply))
-#+END_SRC
-
 *** Dired
-**** Base and utility functions
-#+BEGIN_SRC emacs-lisp
-(use-package dired
-  :config
-  (after! dired+ ;; This overrides the keys, so only after loading
-    (general-def :keymaps 'dired-mode-map
-      "e" #'gas/ediff-files))
-
-  (setq! dired-auto-revert-buffer t
-         dired-dwim-target t
-         dired-hide-details-hide-symlink-targets nil
-         dired-listing-switches "-alh"
-         dired-recursive-copies 'always
-         dired-recursive-deletes 'always
-         image-dired-dir (concat gas-cache-dir "image-dired/")
-         image-dired-db-file (concat image-dired-dir "db.el")
-         image-dired-gallery-dir (concat image-dired-dir "gallery/")
-         image-dired-temp-image-file (concat image-dired-dir "temp-image")
-         image-dired-temp-rotate-image-file (concat image-dired-dir "temp-rotate-image"))
-
-  (defun dired|create-non-existent-directory ()
-    "Create missing directories when creating new files."
-    (let ((parent-directory (file-name-directory buffer-file-name)))
-      (when (and (not (file-exists-p parent-directory))
-                 (y-or-n-p (format "Directory `%s' does not exist! Create it?" parent-directory)))
-        (make-directory parent-directory t))))
-  (push #'dired|create-non-existent-directory find-file-not-found-functions)
-#+END_SRC
-
-***** PDF compressor and merger
-#+BEGIN_SRC emacs-lisp
-(defun gas-pdf-compress-merge-sentinel (process event)
-  (unless (process-live-p process)
-    (let ((exit-code (process-exit-status process)))
-      (if (/= exit-code 0)
-          (error "Something went wrong with the process! Exit code: %d" exit-code)
-        (let* ((data (process-get process 'data))
-               (output (car data))
-               (temp-output-name (car output))
-               (output-name (cdr output))
-               (files (cdr data)))
-          (dolist (file files)
-            (move-file-to-trash file))
-          (ignore-errors (rename-file temp-output-name output-name 1))
-          (message "Done compressing/merging PDF(s)."))))))
-
-(defun gas/pdf-compress-merge (arg)
-  (interactive "P")
-  (let ((files (dired-get-marked-files))
-        (quality "ebook")
-        (color-conv-strat "UseDeviceIndependentColor")
-        (temp-output-name (format "MERGED_FILE_%d.pdf" (random 100000)))
-        output-name)
-    (if (< (length files) 1)
-        (user-error "You must select at least one file!")
-      (when arg
-        (setq quality (completing-read
-                       "Compression type: "
-                       '("default" "screen" "ebook" "printer" "prepress")
-                       nil t nil nil quality)
-              color-conv-strat (completing-read
-                                "Color conversion strategy: "
-                                '("LeaveColorUnchanged" "Gray" "RGB" "sRGB" "CMYK" "UseDeviceIndependentColor")
-                                nil t nil nil color-conv-strat)))
-      (setq output-name (completing-read "Output name: "
-                                         (when (= (length files) 1)
-                                           files)))
-      (when (= (length output-name) 0) (setq output-name "Output.pdf"))
-      (process-put (make-process
-                    :name "PDF Compressor/Merger"
-                    :buffer "*PDF Compress*"
-                    :connection-type 'pipe
-                    :sentinel 'gas-pdf-compress-merge-sentinel
-                    :command
-                    (append
-                     (list "gs" "-dBATCH" "-dNOPAUSE" "-q" "-sDEVICE=pdfwrite"
-                           (concat "-sColorConversionStrategy=/" color-conv-strat)
-                           (concat "-sOutputFile=" temp-output-name)
-                           (concat "-dPDFSETTINGS=/" quality))
-                     files))
-                   'data (cons (cons temp-output-name output-name)  files)))))
-#+END_SRC
-
-***** Whiteboard image creator
-#+BEGIN_SRC emacs-lisp
-(defun gas/whiteboard ()
-  (interactive)
-  (unless (executable-find "whiteboard") (error "No whiteboard script :("))
-  (let ((window-config (current-window-configuration))
-        (files (dired-get-marked-files)))
-    (dolist (file files)
-      (let ((result-name (file-name-sans-extension file))
-            (pos (make-vector 4 nil))
-            (command-arguments "whiteboard"))
-        (find-file file)
-        (if (not (eq major-mode 'image-mode))
-            (message "%s is not an image!" file)
-
-          (let* ((displayed-image (image-get-display-property))
-                 (original-image (image--image-without-parameters displayed-image))
-                 (factor (/ (float (car (image-size original-image t)))
-                            (float (car (image-size displayed-image t)))))
-                 (index 0)
-                 event)
-            (plist-put (cdr (image-get-display-property)) :pointer 'arrow)
-
-            (while (and (not (eq event 'return)) (not (aref pos 3)))
-              (delete-other-windows)
-              (setq event (read-event "Next corner..."))
-              (when (and (listp event) (eq 'mouse-1 (car event))
-                         (eq (selected-window) (posn-window (event-start event))))
-                (setf (aref pos index) (cons (* (car (posn-x-y (event-start event))) factor)
-                                             (* (cdr (posn-x-y (event-start event))) factor)))
-                (setq index (1+ index)))))
-
-          (when (aref pos 3)
-            (setq command-arguments
-                  (concat command-arguments " -c \""
-                          (mapconcat (lambda (x) (format "%d,%d" (car x) (cdr x)))
-                                     pos " ")
-                          "\"")))
-
-          (setq command-arguments (concat command-arguments " " (read-string "Extra arguments: ") " "
-                                          (shell-quote-argument file) " " (shell-quote-argument result-name)
-                                          "-whiteboard.png"))
-
-          (async-shell-command command-arguments))))
-    (set-window-configuration window-config)
-    (dired-unmark-all-marks)))
-#+END_SRC
-
-***** Diff two files
-#+BEGIN_SRC emacs-lisp
-(defun gas/ediff-files ()
-  (interactive)
-  (let ((files (dired-get-marked-files))
-        (wnd (current-window-configuration)))
-    (if (<= (length files) 2)
-        (let ((file1 (car files))
-              (file2 (if (cdr files)
-                         (cadr files)
-                       (read-file-name
-                        "file: "
-                        (dired-dwim-target-directory)))))
-          (if (file-newer-than-file-p file1 file2)
-              (ediff-files file2 file1)
-            (ediff-files file1 file2))
-          (add-hook 'ediff-after-quit-hook-internal
-                    (lambda ()
-                      (setq ediff-after-quit-hook-internal nil)
-                      (set-window-configuration wnd))))
-      (error "no more than 2 files should be marked"))))
-#+END_SRC
-
-***** Rsync
-#+BEGIN_SRC emacs-lisp
-(defun gas/dired-rsync (dest)
-  (interactive
-   (list
-    (expand-file-name
-     (read-file-name
-      "Rsync to:"
-      (dired-dwim-target-directory)))))
-  (let ((files (dired-get-marked-files
-                nil current-prefix-arg))
-        (rsync-command
-         "rsync -arvz --progress "))
-    (dolist (file files)
-      (setq rsync-command
-            (concat rsync-command
-                    (shell-quote-argument file)
-                    " ")))
-    (setq rsync-command
-          (concat rsync-command
-                  (shell-quote-argument dest)))
-    (async-shell-command rsync-command "*rsync*")
-    (other-window 1)))
-#+END_SRC
-
-***** End
-#+BEGIN_SRC emacs-lisp
-) ;; (use-package dired)
-#+END_SRC
-
 **** Diredfl and Dired+
 #+BEGIN_SRC emacs-lisp
 (use-package diredfl :ensure
@@ -3405,9 +2618,9 @@ session as the current block. ARG has same meaning as in
 *** Deft
 #+BEGIN_SRC emacs-lisp
 (use-package deft :ensure
- ;; :general (gas-leader "d" '(deft :wk "Deft"))
+  :bind ("C-c d" . deft)
   :config
-  (setq! deft-directory "~/org/gtd/Deft/"
+  (setq! deft-directory "~/org/gtd/deft/"
          deft-extensions '("org" "txt" "md" "markdown")
          deft-default-extension (car deft-extensions)
          deft-use-filename-as-title nil
@@ -3417,13 +2630,6 @@ session as the current block. ARG has same meaning as in
                                    (case-fn . downcase))
          deft-auto-save-interval 0
          deft-org-mode-title-prefix t))
-#+END_SRC
-
-*** Document viewers
-**** Nov.el
-#+BEGIN_SRC emacs-lisp
-(use-package nov :ensure
-  :mode (("\\.epub\\'" . nov-mode)))
 #+END_SRC
 
 *** Ediff
@@ -3483,42 +2689,6 @@ session as the current block. ARG has same meaning as in
 (use-package apropos
   :custom
   (apropos-do-all t))
-#+END_SRC
-
-**** Calendar and holidays
-#+BEGIN_SRC emacs-lisp
-(use-package calendar
-  :custom
-  (calendar-week-start-day 1)
-  (calendar-location-name "Porto")
-  (calendar-latitude  41.1579)
-  (calendar-longitude -8.6291)
-  :config (setq! calendar-date-display-form calendar-european-date-display-form))
-
-(use-package holidays
-  :custom
-  (calendar-holidays
-   '((holiday-fixed  1  1    "New Year's Day")
-     (holiday-easter-etc -47 "Carnival")
-     (holiday-easter-etc  -2 "Good Friday")
-     (holiday-easter-etc   0 "Easter")
-     (holiday-fixed  4 25    "Freedom Day")
-     (holiday-fixed  5  1    "Labour Day")
-     (holiday-easter-etc  60 "Corpus Christi")
-     (holiday-fixed  6 10    "Portugal Day")
-     (holiday-fixed  8 15    "Assumption")
-     (holiday-fixed 10  5    "Republic Day")
-     (holiday-fixed 11  1    "All Saints Day")
-     (holiday-fixed 12  1    "Restoration of Independence")
-     (holiday-fixed 12  8    "Immaculate Conception")
-     (holiday-fixed 12 25    "Christmas"))))
-#+END_SRC
-
-**** Help
-#+BEGIN_SRC emacs-lisp
-(use-package help
-  :custom
-  (help-window-select t))
 #+END_SRC
 
 **** Spelling
@@ -3682,21 +2852,6 @@ We bind this function to the =%= key.
 #+begin_src emacs-lisp
   (bind-key "%" 'zz/goto-match-paren)
 #+end_src
-
-
-*** Global keybindings
-#+BEGIN_SRC emacs-lisp
-;;(gas-leader
-;;  :infix "f"
-;;  ""  '(:ignore t :wk "Files")
-;;  "f" '(find-file :wk "Open")
-;;  "s" '(save-buffer :wk "Save")
-;;  "r" '(gas/rename-file-and-buffer :wk "Rename current")
-;;  "k" '(gas/delete-file-and-buffer :wk "Delete current")
-;;  "o" '(ff-find-other-file :wk "Switch header/source")
-;;  "b" '(hexl-find-file :wk "Open binary")
-;;  "l" '(find-file-literally :wk "Open literally"))
-#+END_SRC
 
 *** Which-key
 
