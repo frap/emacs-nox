@@ -2470,8 +2470,8 @@ session as the current block. ARG has same meaning as in
        (tags-todo "TODO/!@urgent"
                   ((org-agenda-overriding-header "Tâches isolées")))
        (tags-todo "ATTENTE"
-                  ((org-agenda-overriding-header "Tâches en attente"))))))
-
+                  ((org-agenda-overriding-header "Tâches en attente")))
+       )))
    org-agenda-prefix-format '((agenda . "  %?-12t% s"))
    org-agenda-skip-deadline-prewarning-if-scheduled 'pre-scheduled
    org-agenda-tags-todo-honor-ignore-options t
@@ -2485,30 +2485,21 @@ session as the current block. ARG has same meaning as in
    org-agenda-dim-blocked-tasks nil
    org-agenda-todo-list-sublevels nil
    org-agenda-block-separator ""
-   org-agenda-time-grid '((daily today require-timed) nil "......" "----------------"))
-
-;;  (add-hook 'org-agenda-mode-hook 'gas|org-offer-all-agenda-tags)
-#+END_SRC
-**** Org-GTD
-#+BEGIN_SRC emacs-lisp
-
-(use-package org-gcal
-  :ensure t
-  ;;   :after '(auth-source-pass password-store)
-  :config
-  (setq org-gcal-client-id "887865341451-orrpnv3cu0fnh8hdtge77sv6csqilqtu.apps.googleusercontent.com"
-        org-gcal-client-secret "WmOGOCr_aWPJSqmwXHV-29bv"
-        org-gcal-file-alist
-        '(("agasson@ateasystems.com" . "~/org/gtd/calendars/atea-cal.org")
-          ("ateasystems.com_0ie21uc26j0a41g60b8f99mh1k@group.calendar.google.com" . "~/org/gtd/calendars/changecontrol-cal.org"))))
-
-;;(add-hook 'org-agenda-mode-hook (lambda () (org-gcal-sync) ))
-
-#+END_SRC
-
-**** End
-#+BEGIN_SRC emacs-lisp
-) ;; use-package
+   org-agenda-time-grid '((daily today require-timed) nil "......" "----------------")
+   )
+  (add-hook 'org-agenda-mode-hook 'gas|org-offer-all-agenda-tags)
+  (use-package org-gcal
+    :ensure t
+    ;;   :after '(auth-source-pass password-store)
+    :config
+    (setq org-gcal-client-id "887865341451-orrpnv3cu0fnh8hdtge77sv6csqilqtu.apps.googleusercontent.com"
+          org-gcal-client-secret "WmOGOCr_aWPJSqmwXHV-29bv"
+          org-gcal-file-alist
+          '(("agasson@ateasystems.com" . "~/org/gtd/calendars/atea-cal.org")
+            ("ateasystems.com_0ie21uc26j0a41g60b8f99mh1k@group.calendar.google.com" . "~/org/gtd/calendars/changecontrol-cal.org")))
+    )
+  (add-hook 'org-agenda-mode-hook (lambda () (org-gcal-sync) ))
+  )
 #+END_SRC
 
 *** Capture
