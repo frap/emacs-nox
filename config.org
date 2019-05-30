@@ -2776,16 +2776,6 @@ The main advantage of using this over =define-key= or =global-set-key= is that y
     (bind-key "M-/" 'hippie-expand)
   #+end_src
 
- - The [[https://github.com/justbur/emacs-which-key][which-key]] package makes Emacs functionality much easier to discover and explore: in short, after you start the input of a command and stop, pondering what key must follow, it will automatically open a non-intrusive buffer at the bottom of the screen offering you suggestions for completing the command, that's it, nothing else. It's beautiful.
-
-  #+begin_src emacs-lisp
-    (use-package which-key
-      :defer nil
-      :delight which-key-mode
-      :config
-      (which-key-mode))
-  #+end_src
-
  ** Emulating vi's =%= key
 
 One of the few things I missed in Emacs from vi was the =%= key, which jumps to the parenthesis, bracket or brace which matches the one below the cursor. This function implements the functionality. Inspired by [[http://www.emacswiki.org/emacs/NavigatingParentheses]], but modified to use =smartparens= instead of the default commands, and to work on brackets and braces.
@@ -2845,10 +2835,11 @@ We bind this function to the =%= key.
 #+end_src
 
 *** Which-key
-
+ - The [[https://github.com/justbur/emacs-which-key][which-key]] package makes Emacs functionality much easier to discover and explore: in short, after you start the input of a command and stop, pondering what key must follow, it will automatically open a non-intrusive buffer at the bottom of the screen offering you suggestions for completing the command, that's it, nothing else. It's beautiful.
 #+BEGIN_SRC emacs-lisp
 (use-package which-key :ensure
   :defer 1
+  :delight which-key-mode
   :after-call pre-command-hook
   :bind (
     ("<C-return>"     . gas/open-line-below)
@@ -2856,7 +2847,7 @@ We bind this function to the =%= key.
     ("<backtab>"      . indent-for-tab-command)
     ("<C-tab>"        . indent-region)
     ("M-o"            . other-window)
-;;    ("M-O"            . (λ! (other-window -1)))
+    ("M-O"            . (λ! (other-window -1)))
     ("C-x C-q"        . gas/exit-emacs)
     )
   :config

@@ -1,5 +1,6 @@
 ;; init.el -*- lexical-binding: t -*-
-;; Author: weirdNox (Gonçalo Santos)
+;; Author: frap (Andres Gasson)
+;; Timestamp:
 
 (eval-when-compile (and (version< emacs-version "25.1")
                         (error "This config requires at least GNU Emacs 25.1, but you're running version %s."
