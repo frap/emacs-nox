@@ -515,9 +515,15 @@ called. The buffer to be switched to is current when these hooks run.")
 (require 'package)
 (setq!        package-user-dir      gas-packages-dir
               package-gnupghome-dir gas-packages-dir
+              quelpa-dir            (concat gas-packages-dir "quelpa-cache/")
+              quelpa-verbose gas-debug-mode
+              quelpa-melpa-recipe-stores nil
+              quelpa-checkout-melpa-p nil
+              quelpa-update-melpa-p nil
+              quelpa-self-upgrade-p nil
               package-archives
               '(("gnu"          . "https://elpa.gnu.org/packages/")
-		            ("melpa-stable" . "https://stable.melpa.org/packages/")
+		        ;;    ("melpa-stable" . "https://stable.melpa.org/packages/")
               ;;  ("marmalade"    . "https://marmalade-repo.org/packages/")
                 ("melpa"        . "https://melpa.org/packages/")
                 ("org"          . "https://orgmode.org/elpa/")))
@@ -534,21 +540,16 @@ called. The buffer to be switched to is current when these hooks run.")
 (unless (package-installed-p 'quelpa-use-package) ; unless it is already installed
   (package-refresh-contents) ; update packages archive
   (package-install 'quelpa-use-package); install the latest version of use-package
+  (package-install 'quelpa);
   (package-install 'bind-key)
   )
-;(eval-when-compile
-;
 
-;)
 (require 'quelpa-use-package)
 (require 'bind-key)
 ;;; delight
 ;; Delighted modes are minor modes with no modeline display
 (use-package delight
   :quelpa (delight :fetcher github :repo antonio/delight.el))
-
-;;(use-package delight :ensure t)
-
 
 ;;; key bindings
 (use-package bind-key
@@ -713,20 +714,21 @@ symbols.
          (use-package-process-keywords name rest state))))))
 #+END_SRC
 
-**** Setup Quelpa & Delight
+**** Setup Quelpa
 #+BEGIN_SRC emacs-lisp
-(use-package quelpa :ensure
-  :init
-  (setq! quelpa-dir (concat gas-packages-dir "quelpa-cache/")
-                quelpa-verbose gas-debug-mode
-		quelpa-melpa-recipe-stores nil
-		quelpa-checkout-melpa-p nil
-		quelpa-update-melpa-p nil
-		quelpa-self-upgrade-p nil))
-
-;;(use-package quelpa-use-package :ensure
-;; :demand)
-
+;;;; add recipes that are required by some packages
+(add-to-list
+ 'quelpa-melpa-recipe-stores
+ '(;; eval-sexp-fu
+   (highlight :fetcher github :repo "steckerhalter/highlight.el")
+   ;; magit
+   (let-alist :fetcher url
+              :url "http://git.savannah.gnu.org/cgit/emacs.git/plain/lisp/emacs-lisp/let-alist.el"
+              :version original)
+   ;; cider
+   (queue :fetcher github :repo "emacsmirror/queue")
+   (seq :fetcher github :repo "NicolasPetton/seq.el")
+   (spinner :fetcher github :repo "Malabarba/spinner.el")))
 
 #+END_SRC
 **** Async package byte compilation
@@ -1139,7 +1141,7 @@ ARGS are the same as in `custom-set-faces'."
 				                     `(org-block
 				                       ((t (:foreground ,(color-darken-name base0 7) :background ,(color-darken-name base03 7)))))))))
 
- (use-package gruvbox-theme :ensure)
+ (use-package gruvbox-theme)
 #+END_SRC
 
 **** Extra font-lock-faces
@@ -1236,7 +1238,7 @@ shackle gives you the means to put an end to popped up buffers not behaving they
             ("*Shell Command Output*"      :select nil                                               )
             ("\\*Async Shell.*\\*" :regexp t :ignore t                                                 )
             (occur-mode                    :select nil                                   :align t    )
-            (cider-repl-mode               :select nil                                   :popup t    )
+           ;; (cider-repl-mode               :select nil                                   :popup t    )
 
             ("*Help*"                      :select t   :inhibit-window-quit t :other t               )
             ("*Completions*"                                                  :size 0.3  :align t    )
@@ -1325,7 +1327,7 @@ I use [[https://www.masteringemacs.org/article/introduction-to-ido-mode][IDO mod
 
 #+begin_src emacs-lisp
   (use-package ido
-   ;; :disabled t
+    :disabled t
     :config
     (ido-mode t)
     (ido-everywhere 1)
@@ -1335,7 +1337,7 @@ I use [[https://www.masteringemacs.org/article/introduction-to-ido-mode][IDO mod
     (setq ido-auto-merge-work-directories-length -1))
 
   (use-package ido-completing-read+
-  ;;  :disabled t
+    :disabled t
     :config
     (ido-ubiquitous-mode 1))
 #+end_src
@@ -1345,62 +1347,56 @@ I use [[https://www.masteringemacs.org/article/introduction-to-ido-mode][IDO mod
 This config came originally from [[https://github.com/daedreth/UncleDavesEmacs#user-content-ido-and-why-i-started-using-helm][Uncle Dave's Emacs config]], thought I have tweaked it a bit.
 
 #+begin_src emacs-lisp
-  (use-package helm
-    :disabled t
-    :ensure
-    :defer 1
-    :delight helm-mode
-    :bind
-    (("C-x C-f"       . helm-find-files)
-     ("C-x C-b"       . helm-buffers-list)
-     ("C-x b"         . helm-multi-files)
-     ("M-x"           . helm-M-x)
-     :map helm-find-files-map
-     ("C-<backspace>" . helm-find-files-up-one-level)
-     ("C-f"           . helm-execute-persistent-action)
-     ([tab]           . helm-ff-RET))
-    :config
-    (defun daedreth/helm-hide-minibuffer ()
-      (when (with-helm-buffer helm-echo-input-in-header-line)
-        (let ((ov (make-overlay (point-min) (point-max) nil nil t)))
-          (overlay-put ov 'window (selected-window))
-          (overlay-put ov 'face
-                       (let ((bg-color (face-background 'default nil)))
-                         `(:background ,bg-color :foreground ,bg-color)))
-          (setq-local cursor-type nil))))
-    (add-hook 'helm-minibuffer-set-up-hook 'daedreth/helm-hide-minibuffer)
-    (setq helm-autoresize-max-height 0
-          helm-autoresize-min-height 40
-          helm-M-x-fuzzy-match t
-          helm-buffers-fuzzy-matching t
-          helm-recentf-fuzzy-match t
-          helm-semantic-fuzzy-match t
-          helm-imenu-fuzzy-match t
-          helm-split-window-in-side-p nil
-          helm-move-to-line-cycle-in-source nil
-          helm-ff-search-library-in-sexp t
-          helm-scroll-amount 8
-          helm-echo-input-in-header-line nil)
-    :init
-    (helm-mode 1))
+;;; helm
+;; fancy candidate selection framework
+(use-package helm
+  :unless (setq async-bytecomp-allowed-packages nil) ;disable async bytecomp
+  :quelpa (helm :repo "emacs-helm/helm" :fetcher github :files ("*.el" "emacs-helm.sh"))
+  :diminish
+  :commands helm-mini
 
+  :init
+  (setq helm-idle-delay 0.1)
+  (setq helm-input-idle-delay 0.1)
+  (setq helm-buffer-max-length 50)
+  (setq helm-M-x-always-save-history t)
+  (setq helm-buffer-details-flag nil)
+  (setq helm-mode-handle-completion-in-region nil) ;don't use helm for `completion-at-point'
+  (setq helm-grep-ag-command "rg --color=always --smart-case --no-heading --line-number %s %s %s")
+
+  :bind ("M-x" . helm-M-x)
+
+  :config
   (require 'helm-config)
-  (helm-autoresize-mode 1)
+  (helm-mode 1)
+  (add-to-list 'helm-completing-read-handlers-alist '(dired-create-directory))
+  (add-to-list 'helm-boring-buffer-regexp-list ":.*")
 
-  (use-package helm-flx
-    :disabled t
-    :ensure
-    :custom
-    (helm-flx-for-helm-find-files t)
-    (helm-flx-for-helm-locate t)
-    :config
-    (helm-flx-mode +1))
+  ;; Yet Another `describe-bindings' with `helm'.
+  (use-package helm-descbinds
+    :quelpa (helm-descbinds :repo "emacs-helm/helm-descbinds" :fetcher github)
+    :config (helm-descbinds-mode))
 
-  (use-package swiper-helm
-   :disabled
-   :ensure
-   :bind
-    ("C-s" . swiper))
+;; Helm integration for Projectile
+  (use-package helm-projectile
+    :quelpa (helm-projectile :repo "bbatsov/helm-projectile" :fetcher github))
+
+  ;; Helm UI wrapper for system package managers.
+  (use-package helm-system-packages
+    :quelpa (helm-system-packages :repo "emacs-helm/helm-system-packages" :fetcher github))
+
+  (use-package helm-rg
+    :quelpa (helm-rg :fetcher github :repo "cosmicexplorer/helm-rg"))
+
+  ;; Efficiently hopping squeezed lines powered by helm interface
+  (use-package helm-swoop
+    :quelpa
+    :bind (:map
+           isearch-mode-map ("M-i" . helm-swoop-from-isearch)
+           :map
+           helm-swoop-map ("M-i" . helm-multi-swoop-all-from-helm-swoop))
+    :init (setq helm-swoop-speed-or-color t)))
+#=end_src
 
 *** Counsel
     Ivy backends for a lot more commands
@@ -1948,24 +1944,10 @@ fundamental-mode) for performance sake."
 #+END_SRC
 
 ** Programming languages
+general setup for programming
 #+begin_src emacs-lisp
 ;;;; prog-mode
 ;; Generic major mode for programming
-;;;; add recipes that are required by some packages
-(add-to-list
- 'quelpa-melpa-recipe-stores
- '(;; eval-sexp-fu
-   (highlight :fetcher github :repo "steckerhalter/highlight.el")
-   ;; magit
-   (let-alist :fetcher url
-              :url "http://git.savannah.gnu.org/cgit/emacs.git/plain/lisp/emacs-lisp/let-alist.el"
-              :version original)
-   ;; cider
-   (queue :fetcher github :repo "emacsmirror/queue")
-   (seq :fetcher github :repo "NicolasPetton/seq.el")
-   (spinner :fetcher github :repo "Malabarba/spinner.el")))
-
-
 (use-package prog-mode
   :config
   (defun my-prog-mode-hook ()
@@ -2043,7 +2025,8 @@ fundamental-mode) for performance sake."
   :defer
   :hook
   (prog-mode       . turn-on-eldoc-mode)
-  (cider-repl-mode . turn-on-eldoc-mode))
+  (cider-repl-mode . turn-on-eldoc-mode)
+)
 
 (defun zz/sp-enclose-next-sexp (num) (interactive "p") (insert-parentheses (or num 1)))
 (use-package smartparens
@@ -2070,8 +2053,7 @@ fundamental-mode) for performance sake."
   ;; (after-init . smartparens-global-mode)
   ((clojure-mode
     emacs-lisp-mode
-    lisp-mode
-    cider-repl-mode) . smartparens-strict-mode)
+    lisp-mode) . smartparens-strict-mode)
   (smartparens-mode  . sp-use-paredit-bindings)
   (smartparens-mode  . (lambda () (local-set-key (kbd "M-(") 'zz/sp-enclose-next-sexp)))
 )
@@ -2088,6 +2070,7 @@ fundamental-mode) for performance sake."
 ;;;; cider
 ;; Clojure Interactive Development Environment that Rocks
 (use-package cider
+  :defer
   :quelpa (cider
            :fetcher github
            :repo "clojure-emacs/cider"
@@ -2678,12 +2661,60 @@ session as the current block. ARG has same meaning as in
 *** Dired
 **** Diredfl and Dired+
 #+BEGIN_SRC emacs-lisp
+;;;; dired
+;; directory-browsing commands
+(use-package dired
+  :after-call (dired-mode-hook)
+  :init
+  (defun my-find-name-dired (pattern)
+    "Find files in `default-directory' using `rg' if available.
+PREFIX forces the use of `find'."
+    (interactive "sFind-name (filename wildcard): ")
+    (if (and (not current-prefix-arg) (executable-find "rg"))
+        (let ((find-program (concat "rg -g " (shell-quote-argument pattern) " --files"))
+              (find-ls-option (cons "" "-dilsb")))
+          (find-dired default-directory ""))
+      (find-dired
+       default-directory
+       (concat find-name-arg " " (shell-quote-argument pattern)))))
+
+  (setq dired-auto-revert-buffer t)
+  (setq dired-no-confirm
+        '(byte-compile chgrp chmod chown copy delete load move symlink))
+  (setq dired-deletion-confirmer (lambda (x) t))
+  :bind (:map dired-mode-map ("`" . dired-toggle-read-only))
+  :config
+  ;; make rename use ido and not helm
+  (put 'dired-do-rename 'ido 'find-file)
+  ;; make copy use ido and not helm
+  (put 'dired-do-copy 'ido 'find-file)
+
+  ;; Rename files editing their names in dired buffers
+  (use-package wdired
+  :after-call (dired-mode-hook)
+    :init
+    ;; allow changing of file permissions
+    (setq wdired-allow-to-change-permissions t))
+
+
 (use-package diredfl :ensure
   :after-call (dired-mode-hook)
   :config (diredfl-global-mode))
 
 (use-package dired+ :quelpa (dired+ :fetcher wiki)
   :after-call (dired-mode-hook))
+
+;; dired+ adds some features to standard dired (like reusing buffers)
+  (use-package dired+
+    :quelpa (dired+ :fetcher url :url "https://www.emacswiki.org/emacs/download/dired+.el")
+    :after-call (dired-mode-hook)
+    :init
+    (setq diredp-hide-details-initially-flag nil)
+    (setq diredp-hide-details-propagate-flag nil)
+
+    :config
+    (diredp-toggle-find-file-reuse-dir 1)))
+
 #+END_SRC
 
 *** Deft
