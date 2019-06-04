@@ -531,25 +531,142 @@ called. The buffer to be switched to is current when these hooks run.")
 
 **** Setup use-package
 #+BEGIN_SRC emacs-lisp
-(unless (package-installed-p 'use-package) ; unless it is already installed
+(unless (package-installed-p 'quelpa-use-package) ; unless it is already installed
   (package-refresh-contents) ; update packages archive
-  (package-install 'use-package); install the latest version of use-package
+  (package-install 'quelpa-use-package); install the latest version of use-package
+  (package-install 'bind-key)
   )
-(eval-when-compile
-(require 'use-package)
-)
-(use-package delight :ensure t)
+;(eval-when-compile
+;
+
+;)
+(require 'quelpa-use-package)
 (require 'bind-key)
+;;; delight
+;; Delighted modes are minor modes with no modeline display
+(use-package delight
+  :quelpa (delight :fetcher github :repo antonio/delight.el))
+
+;;(use-package delight :ensure t)
+
+
+;;; key bindings
+(use-package bind-key
+ :disabled
+  ;; A simple way to manage personal keybindings, provided by `use-package'
+  :init
+  ;; If non-nil, extract docstrings from lambdas, closures and keymaps if possible.
+  (setq bind-key-describe-special-forms t)
+
+  (defun my-keyboard-translations (&optional frame)
+    (with-selected-frame (or frame (selected-frame))
+      (define-key input-decode-map (kbd "C-h") (kbd "<backspace>"))
+      (define-key input-decode-map (kbd "M-h") (kbd "<M-backspace>"))))
+  (add-to-list 'after-make-frame-functions 'my-keyboard-translations)
+
+;;;; personal functions
+  (defun my-switch-to-scratch () (interactive)
+         (switch-to-buffer "*scratch*"))
+
+  (defun my-kill-buffer () (interactive)
+         (kill-buffer (buffer-name)))
+
+  (defun my-select-prev-window () (interactive)
+         (select-window (previous-window)))
+
+  (defun my-select-next-window () (interactive)
+         (select-window (next-window)))
+
+  (defun my-indent-whole-buffer () (interactive)
+         (indent-region (point-min) (point-max)))
+
+  (defun my-split-window()
+    "Split the window to see the most recent buffer in the other window.
+Call a second time to restore the original window configuration."
+    (interactive)
+    (if (eq last-command 'my-split-window)
+        (progn
+          (jump-to-register :my-split-window)
+          (setq this-command 'my-unsplit-window))
+      (window-configuration-to-register :my-split-window)
+      (switch-to-buffer-other-window nil)))
+
+  (defmacro my-package-desc (info-type library)
+    `(,(intern (format "package-desc-%s" info-type))
+      (with-temp-buffer
+        (insert-file-contents-literally (find-library-name (format "%s" ,library)))
+        (package-buffer-info))))
+
+  (defun my-insert-package-desc-summary ()
+    (interactive)
+    (let* ((name (thing-at-point 'symbol t))
+           (summary (my-package-desc summary name)))
+      (back-to-indentation)
+      (open-line 1)
+      (insert (format ";; %s" summary))))
+
+  (defun my-show-file-name ()
+    "Show the full path file name in the minibuffer."
+    (interactive)
+    (message (buffer-file-name))
+    (kill-new (file-truename buffer-file-name)))
+
+  (defun my-toggle-window-split ()
+    (interactive)
+    (if (= (count-windows) 2)
+        (let* ((this-win-buffer (window-buffer))
+               (next-win-buffer (window-buffer (next-window)))
+               (this-win-edges (window-edges (selected-window)))
+               (next-win-edges (window-edges (next-window)))
+               (this-win-2nd (not (and (<= (car this-win-edges)
+                                           (car next-win-edges))
+                                       (<= (cadr this-win-edges)
+                                           (cadr next-win-edges)))))
+               (splitter
+                (if (= (car this-win-edges)
+                       (car (window-edges (next-window))))
+                    'split-window-horizontally
+                  'split-window-vertically)))
+          (delete-other-windows)
+          (let ((first-win (selected-window)))
+            (funcall splitter)
+            (if this-win-2nd (other-window 1))
+            (set-window-buffer (selected-window) this-win-buffer)
+            (set-window-buffer (next-window) next-win-buffer)
+            (select-window first-win)
+            (if this-win-2nd (other-window 1))))))
+
+(defun my-timestamp ()
+    (interactive)
+    (let ((timestring (if current-prefix-arg
+                          "%H:%M"
+                        "%a %d.%m.%y %H:%M")))
+      (insert (format-time-string timestring))))
+
+;;;; global key bindings
+  :bind
+  ("<f6>" . my-kill-buffer)
+  ("<f7>" . my-toggle-window-split)
+  ("C-8" . my-split-window)
+  ("<f2>" . split-window-vertically)
+  ("S-<f2>" . make-frame-command)
+  ("<f3>" . split-window-horizontally)
+  ("<f4>" . delete-window)
+  ("S-<f4>" . delete-frame)
+  ("<f5>" . delete-other-windows)
+  ("S-<f5>" . delete-other-frames)
+  ("C-c c" . (org-capture nil "s")))
+
 ;(setq use-package-always-ensure t)
 
 (use-package use-package-chords :ensure
 :config (key-chord-mode t))
 
 (setq! use-package-always-defer t
-              use-package-verbose gas-debug-mode
-              use-package-compute-statistics gas-debug-mode
-              use-package-minimum-reported-time (if gas-debug-mode 0 0.1)
-              use-package-expand-minimally noninteractive)
+       use-package-verbose gas-debug-mode
+       use-package-compute-statistics gas-debug-mode
+       use-package-minimum-reported-time (if gas-debug-mode 0 0.1)
+       use-package-expand-minimally noninteractive)
 #+END_SRC
 
 Add the :after-call keyword, that takes a symbol or list of symbols, where the symbols are
@@ -596,7 +713,7 @@ symbols.
          (use-package-process-keywords name rest state))))))
 #+END_SRC
 
-**** Setup Quelpa
+**** Setup Quelpa & Delight
 #+BEGIN_SRC emacs-lisp
 (use-package quelpa :ensure
   :init
@@ -607,8 +724,10 @@ symbols.
 		quelpa-update-melpa-p nil
 		quelpa-self-upgrade-p nil))
 
-(use-package quelpa-use-package :ensure
- :demand)
+;;(use-package quelpa-use-package :ensure
+;; :demand)
+
+
 #+END_SRC
 **** Async package byte compilation
 #+BEGIN_SRC emacs-lisp
@@ -625,6 +744,12 @@ symbols.
 (use-package hydra :ensure
   :bind ("C-c m" . hydra-magit/body)
   :config (setq! lv-use-separator t))
+
+(defhydra hydra-zoom (global-map "C-c")
+  "zoom"
+  ("+" default-text-scale-increase "in")
+  ("=" default-text-scale-increase "in")
+  ("-" default-text-scale-decrease "out"))
 #+END_SRC
 
 ** General Settings and tweaks
@@ -1200,7 +1325,7 @@ I use [[https://www.masteringemacs.org/article/introduction-to-ido-mode][IDO mod
 
 #+begin_src emacs-lisp
   (use-package ido
-    :disabled t
+   ;; :disabled t
     :config
     (ido-mode t)
     (ido-everywhere 1)
@@ -1210,7 +1335,7 @@ I use [[https://www.masteringemacs.org/article/introduction-to-ido-mode][IDO mod
     (setq ido-auto-merge-work-directories-length -1))
 
   (use-package ido-completing-read+
-    :disabled t
+  ;;  :disabled t
     :config
     (ido-ubiquitous-mode 1))
 #+end_src
@@ -1272,15 +1397,16 @@ This config came originally from [[https://github.com/daedreth/UncleDavesEmacs#u
     (helm-flx-mode +1))
 
   (use-package swiper-helm
-    :ensure
-    :bind
+   :disabled
+   :ensure
+   :bind
     ("C-s" . swiper))
 
 *** Counsel
     Ivy backends for a lot more commands
 #+BEGIN_SRC emacs-lisp
 (use-package counsel
- ;; :disabled t
+  :disabled t
   :after-call pre-command-hook
   :after ivy
   :commands (counsel-mode)
@@ -1410,7 +1536,7 @@ This config came originally from [[https://github.com/daedreth/UncleDavesEmacs#u
 #+BEGIN_SRC emacs-lisp
 
 (use-package ivy
- ;; :disabled t
+  :disabled t
  ;; :bind (("C-c u" . ivy-resume))
   :delight ivy-mode
   :defer 0.5
@@ -1437,7 +1563,7 @@ This config came originally from [[https://github.com/daedreth/UncleDavesEmacs#u
    ("RET" . ivy-occur-press)))
 
 (use-package ivy-rich
- ;; :disabled t
+  :disabled t
   :after ivy
   :custom
   (ivy-virtual-abbreviate 'full
@@ -1453,8 +1579,8 @@ This config came originally from [[https://github.com/daedreth/UncleDavesEmacs#u
 #+BEGIN_SRC emacs-lisp
 
 (use-package swiper
-;;:disabled t
-:after ivy
+  :disabled t
+  :after ivy
   :bind (("C-r" . swiper)
          ("C-s" . counsel-grep-or-swiper)
          ("C-c C-r" . ivy-resume)
@@ -1864,6 +1990,31 @@ fundamental-mode) for performance sake."
 #+END_SRC
 
 ** Programming languages
+#+begin_src emacs-lisp
+;;;; prog-mode
+;; Generic major mode for programming
+;;;; add recipes that are required by some packages
+(add-to-list
+ 'quelpa-melpa-recipe-stores
+ '(;; eval-sexp-fu
+   (highlight :fetcher github :repo "steckerhalter/highlight.el")
+   ;; magit
+   (let-alist :fetcher url
+              :url "http://git.savannah.gnu.org/cgit/emacs.git/plain/lisp/emacs-lisp/let-alist.el"
+              :version original)
+   ;; cider
+   (queue :fetcher github :repo "emacsmirror/queue")
+   (seq :fetcher github :repo "NicolasPetton/seq.el")
+   (spinner :fetcher github :repo "Malabarba/spinner.el")))
+
+
+(use-package prog-mode
+  :config
+  (defun my-prog-mode-hook ()
+    (setq show-trailing-whitespace 1)
+    (prettify-symbols-mode 1))
+  :hook (prog-mode . my-prog-mode-hook))
+#+end_src
 *** Rust
 #+BEGIN_SRC emacs-lisp
 (use-package rust-mode
@@ -1976,66 +2127,19 @@ fundamental-mode) for performance sake."
 :ensure
 :defer t)
 
+;;;; cider
+;; Clojure Interactive Development Environment that Rocks
 (use-package cider
-  :ensure
-  :defer
-  :bind  (:map cider-mode-map
-           ;;    ("C-c C-v C-c" . cider-send-and-evaluate-sexp)
-               ("C-c C-p"     . cider-eval-print-last-sexp))
-  :custom
-  ;; nice pretty printing
-  (cider-repl-use-pretty-printing nil)
-  ;; nicer font lock in REPL
-  (cider-repl-use-clojure-font-lock t)
-  ;; result prefix for the REPL
-  (cider-repl-result-prefix "; => ")
-  ;; never ending REPL history
-  (cider-repl-wrap-history t)
-  ;; looong history
-  (cider-repl-history-size 5000)
-  ;; persistent history
-  (cider-repl-history-file cider-history)
-  ;; error buffer not popping up
-  (cider-show-error-buffer nil)
-  ;; REPL buffer auto-displayed but not focused
-  (cider-repl-pop-to-buffer-on-connect 'display-only)
-  :config
-;;  (require 'cider-eval-sexp-fu)
-  (add-hook 'cider-repl-mode-hook #'subword-mode)
-  (add-hook 'cider-repl-mode-hook #'company-mode)
-  (add-hook 'cider-mode-hook #'company-mode)
-  (add-hook 'cider-mode-hook #'eldoc-mode)
-;; autoscrolling repl output
-(add-hook 'cider-repl-mode-hook '(lambda () (setq scroll-conservatively 101)))
-;; nrepl isn't based on comint
-  (add-hook 'cider-repl-mode-hook
-            (lambda () (setq show-trailing-whitespace nil)))
-  ;; (add-hook 'cider-mode-hook #'cider-hydra-mode)
-   ; Skip :user section of ~/.lein/profiles.clj when using cider-jack-in.
-  (setq cider-lein-parameters
-      "with-profile -user repl :headless :host localhost")
-   (defun cider-send-and-evaluate-sexp ()
-  "Sends the s-expression located before the point or the active
-      region to the REPL and evaluates it. Then the Clojure buffer is
-      activated as if nothing happened."
-  (interactive)
-  (if (not (region-active-p))
-      (cider-insert-last-sexp-in-repl)
-    (cider-insert-in-repl
-     (buffer-substring (region-beginning) (region-end)) nil))
-  (cider-switch-to-repl-buffer)
-  (cider-repl-closing-return)
-  (cider-switch-to-last-clojure-buffer)
-  (message ""))
-  ;;(  cider-namespace-refresh)
-  )
-
-;; cider comments
-(defun ha/cider-append-comment ()
-  (when (null (nth 8 (syntax-ppss)))
-    (insert " ; ")))
-
-(advice-add 'cider-eval-print-last-sexp :before #'ha/cider-append-comment)
+  :quelpa (cider
+           :fetcher github
+           :repo "clojure-emacs/cider"
+           :files ("*.el" (:exclude ".dir-locals.el"))
+           :old-names (nrepl))
+  :init
+  (setq cider-popup-stacktraces nil)
+  (setq cider-repl-popup-stacktraces nil)
+  (setq cider-repl-pop-to-buffer-on-connect t)
+  (setq cider-repl-use-clojure-font-lock t))
 
 ;; cider to work with org-mode
 (use-package ob-clojurescript
@@ -2060,6 +2164,24 @@ fundamental-mode) for performance sake."
   (use-package flycheck
     :config
     (setq flycheck-display-errors-function 'flycheck-pos-tip-error-messages)))
+
+;;;; eval-sexp-fu
+;; flash the region that is evaluated (visual feedback) in elisp
+(use-package eval-sexp-fu
+  :ensure t
+  :quelpa (eval-sexp-fu  :fetcher github :repo "hchbaw/eval-sexp-fu.el")
+  :bind
+  (:map lisp-interaction-mode-map
+        ("C-c C-c" . eval-sexp-fu-eval-sexp-inner-list)
+        ("C-c C-e" . eval-sexp-fu-eval-sexp-inner-sexp)
+        :map emacs-lisp-mode-map
+        ("C-c C-c" . eval-sexp-fu-eval-sexp-inner-list)
+        ("C-c C-e" . eval-sexp-fu-eval-sexp-inner-sexp))
+  :init
+  (setq eval-sexp-fu-flash-duration 0.4)
+  :config
+  (turn-on-eval-sexp-fu-flash-mode))
+
 #+END_SRC
 *** JS
 #+BEGIN_SRC emacs-lisp
@@ -2839,17 +2961,17 @@ We bind this function to the =%= key.
 #+BEGIN_SRC emacs-lisp
 (use-package which-key :ensure
   :defer 1
-  :delight which-key-mode
+;  :delight which-key-mode
   :after-call pre-command-hook
-  :bind (
-    ("<C-return>"     . gas/open-line-below)
-    ("<C-M-return>"   . gas/open-line-above)
-    ("<backtab>"      . indent-for-tab-command)
-    ("<C-tab>"        . indent-region)
-    ("M-o"            . other-window)
-    ("M-O"            . (λ! (other-window -1)))
-    ("C-x C-q"        . gas/exit-emacs)
-    )
+;  :bind (
+;         ("<C-return>"     . gas/open-line-below)
+;         ("<C-M-return>"   . gas/open-line-above)
+;         ("<backtab>"      . indent-for-tab-command)
+;         ("<C-tab>"        . indent-region)
+;         ("M-o"            . other-window)
+;         ("M-O"            . (λ! (other-window -1)))
+;         ("C-x C-q"        . gas/exit-emacs)
+;    )
   :config
   (setq! which-key-sort-order #'which-key-prefix-then-key-order
          which-key-sort-uppercase-first nil
