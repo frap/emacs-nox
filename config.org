@@ -517,7 +517,7 @@ called. The buffer to be switched to is current when these hooks run.")
               package-gnupghome-dir gas-packages-dir
               package-archives
               '(("gnu"          . "https://elpa.gnu.org/packages/")
-		          ("melpa-stable" . "https://stable.melpa.org/packages/")
+		            ("melpa-stable" . "https://stable.melpa.org/packages/")
               ;;  ("marmalade"    . "https://marmalade-repo.org/packages/")
                 ("melpa"        . "https://melpa.org/packages/")
                 ("org"          . "https://orgmode.org/elpa/")))
@@ -793,7 +793,7 @@ with functions that require it."
 ** UI
 *** Settings
 #+BEGIN_SRC emacs-lisp
-(setq! initial-frame-alist '( (top . 0) (left . 0) (width . 120) (height . 80)
+(setq! initial-frame-alist '( (top . 0) (left . 0) (width . 400) (height . 300)
    ;;(fullscreen . fullboth)
    ;;   (fullscreen-restore . maximized)
                              )
@@ -1675,51 +1675,9 @@ Password management using =auth-sources= and =pass= (I normally use 1Password, b
       (apply orig-fun args)))
   (advice-add #'projectile-cache-current-file :around #'gas*projectile-cache-current-file)
 
-  (defhydra hydra-projectile (:color teal
-                                :hint  nil)
-      "
-     PROJECTILE: %(if (fboundp 'projectile-project-root) (projectile-project-root) \"TBD\")
-^^^^       Find               ^^   Search/Tags       ^^^^       Buffers               ^^   Cache                     ^^^^       Other
-^^^^--------------------------^^---------------------^^^^-----------------------------^^------------------------------------------------------------------
-_f_/_s-f_: file               _a_: ag                ^^    _i_: Ibuffer               _c_: cache clear               ^^    _E_: edit project's .dir-locals.el
-^^    _F_: file dwim          _o_: multi-occur        _: switch to buffer      _x_: remove known project      _s-p_/_p_: switch to other project
-^^    _d_: file curr dir      ^^                     _K_/_s-k_: kill all buffers      _X_: cleanup non-existing      ^^    _g_: switch to Magit status of other project
-^^    _l_: file literally     ^^                     ^^^^                             _z_: cache current             ^^    _P_: switch to an open project
-^^    _r_: recent file        ^^                     ^^^^                             ^^                             ^^    _D_: find dir
-"
-      ("a"   projectile-ag)
-      ("b"   projectile-switch-to-buffer)
-      ("c"   projectile-invalidate-cache)
-      ("d"   projectile-find-file-in-directory)
-      ("f"   projectile-find-file)
-      ("s-f" projectile-find-file)
-      ("F"   projectile-find-file-dwim)
-      ("D"   projectile-find-dir)
-      ("E"   projectile-edit-dir-locals)
-      ("g"   projectile-switch-project-magit-status)
-      ("G"   ggtags-update-tags)
-      ("i"   projectile-ibuffer)
-      ("K"   projectile-kill-buffers)
-      ("s-k" projectile-kill-buffers)
-      ("l"   projectile-find-file-literally)
-      ("m"   projectile-multi-occur)
-      ("o"   projectile-multi-occur)
-      ("p"   projectile-switch-project)
-      ("s-p" projectile-switch-project)
-      ("P"   projectile-switch-open-project)
-      ("s"   projectile-switch-project)
-      ("r"   projectile-recentf)
-      ("x"   projectile-remove-known-project)
-      ("X"   projectile-cleanup-known-projects)
-      ("z"   projectile-cache-current-file)
-   ;   ("4"   hydra-projectile-other-window/body "other window")
-      ("q"   nil "cancel" :color blue))
-
   (projectile-mode))
 
  (use-package counsel-projectile :ensure
-   :bind-keymap
-     ([remap projectile-command-map "SPC"] .     counsel-projectile)
    :bind
      (([remap projectile-find-file]        .     counsel-projectile-find-file)
       ([remap projectile-find-dir]         .     counsel-projectile-find-dir)
@@ -2498,7 +2456,7 @@ session as the current block. ARG has same meaning as in
           '(("agasson@ateasystems.com" . "~/org/gtd/calendars/atea-cal.org")
             ("ateasystems.com_0ie21uc26j0a41g60b8f99mh1k@group.calendar.google.com" . "~/org/gtd/calendars/changecontrol-cal.org")))
     )
-  (add-hook 'org-agenda-mode-hook (lambda () (org-gcal-sync) ))
+  ;;(add-hook 'org-agenda-mode-hook (lambda () (org-gcal-sync) ))
   )
 #+END_SRC
 
