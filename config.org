@@ -2058,6 +2058,7 @@ general setup for programming
   (smartparens-mode  . (lambda () (local-set-key (kbd "M-(") 'zz/sp-enclose-next-sexp)))
 )
 
+
 (use-package rainbow-delimiters
   :ensure
   :hook
@@ -2123,6 +2124,22 @@ general setup for programming
   :config
   (turn-on-eval-sexp-fu-flash-mode))
 
+#+END_SRC
+*** Java
+#+BEGIN_SRC emacs-lisp
+(use-package lsp-mode :ensure t)
+(use-package company-lsp :ensure t)
+(use-package lsp-ui :ensure t)
+(use-package lsp-java :ensure t :after lsp
+  :config (add-hook 'java-mode-hook 'lsp))
+
+(use-package dap-mode
+  :ensure t :after lsp-mode
+  :config
+  (dap-mode t)
+  (dap-ui-mode t))
+
+(use-package dap-java :after (lsp-java))
 #+END_SRC
 *** JS
 #+BEGIN_SRC emacs-lisp
@@ -2997,3 +3014,4 @@ We bind this function to the =%= key.
                (message "Loading %s...done (%.3fs) [after-init]"
                         ,load-file-name elapsed))) t)
 #+END_SRC
+ 
