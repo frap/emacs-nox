@@ -12,12 +12,12 @@
        (el  (expand-file-name "config.el" user-emacs-directory))
        (elc (concat el "c")))
   (when (and (file-exists-p elc)
-             (file-newer-than-file-p org elc))
+             (file-newer-than-file-p el elc))
     (message "Byte compiled init is old - deleting...")
     (dolist (file (directory-files user-emacs-directory nil ".*\.elc"))
       (delete-file (expand-file-name file user-emacs-directory))))
 
-  (cond ((file-exists-p elc) (load elc nil t))
+  (cond ((file-exists-p el) (load el nil t))
         (t
          (message "Loading config.el...")
          (when (file-newer-than-file-p org el)
