@@ -1,4 +1,4 @@
 .local/*
-config.el
+config.org
 amx-items
 *.elc
