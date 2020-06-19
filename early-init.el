@@ -1,30 +1,50 @@
-;; early-init.el -*- lexical-binding: t -*-
-;; Author: copied from weirdNox (Andrés Gasson)
+;;; early-init.el -*- lexical-binding: t -*-
+;; Emacs HEAD (27+) introduces early-init.el, which is run before init.el,
+;; before package and UI initialization happens.
+(defvar emacs-start-time (current-time))
+;; Defer garbage collection further back in the startup process
+(setq gc-cons-threshold most-positive-fixnum)
 
-(defconst emacs-start-time (current-time))
+;; In Emacs 27+, package initialization occurs before `user-init-file' is
+;; loaded, but after `early-init-file'. Doom handles package initialization, so
+;; we must prevent Emacs from doing it early!
+(setq package-enable-at-startup nil)
+(advice-add #'package--ensure-init-file :override #'ignore)
 
+;; take a copy of initial file-name-handle-alist
 (defvar initial--file-name-handler-alist file-name-handler-alist)
 
-(defun gas|reset-temporary-init-values ()
+;;----------------------------------------------------------------------------
+;; Adjust garbage collection thresholds during startup, and thereafter
+;;----------------------------------------------------------------------------
+(defun normal-gc-values ()
   "Resets garbage collection settings to reasonable defaults (if you don't do
 this, you'll get stuttering and random freezes) and resets `file-name-handler-alist'."
   (setq file-name-handler-alist initial--file-name-handler-alist
-        gc-cons-threshold 16777216
+        gc-cons-threshold (* 20 1024 1024)
         gc-cons-percentage 0.15))
 
 (unless noninteractive
   (unless after-init-time
     (setq package-enable-at-startup nil
-          gc-cons-threshold 402653184
+          gc-cons-threshold (* 128 1024 1024)
           gc-cons-percentage 0.6
           message-log-max 16384
           file-name-handler-alist nil
           auto-window-vscroll nil))
-  (add-hook 'emacs-startup-hook #'gas|reset-temporary-init-values))
+  (add-hook 'emacs-startup-hook #'normal-gc-values))
 
-(setq load-prefer-newer noninteractive
-      package-enable-at-startup nil)
+;; Prevent the glimpse of un-styled Emacs by disabling these UI elements early.
+(push '(menu-bar-lines . 0) default-frame-alist)
+(push '(tool-bar-lines . 0) default-frame-alist)
+(push '(vertical-scroll-bars) default-frame-alist)
 
-(if (fboundp 'tool-bar-mode) (tool-bar-mode -1))
-(if (fboundp 'menu-bar-mode) (menu-bar-mode -1))
-(if (fboundp 'scroll-bar-mode) (scroll-bar-mode -1))
+;; Resizing the Emacs frame can be a terribly expensive part of changing the
+;; font. By inhibiting this, we easily halve startup times with fonts that are
+;; larger than the system default.
+(setq frame-inhibit-implied-resize t)
+
+;; Ignore X resources; its settings would be redundant with the other settings
+;; in this file and can conflict with later config (particularly where the
+;; cursor color is concerned).
+(advice-add #'x-apply-session-resources :override #'ignore)

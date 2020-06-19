@@ -1,5 +1,8 @@
 ;; -*- lexical-binding: t -*-
 
+;; Measure startup time
+(require 'init-benchmarking)
+
 (setq-default user-full-name "Andrés Gasson")
 
 (require 'subr-x)
@@ -822,7 +825,7 @@ with functions that require it."
        (when (display-graphic-p)
          (setenv "GIT_ASKPASS" "git-gui--askpass"))))
 
-(setq! initial-frame-alist '( (top . 0) (left . 0) (width . 400) (height . 300)
+(setq! initial-frame-alist '( (top . 0) (left . 0) (width . 200) (height . 80)
    ;;(fullscreen . fullboth)
    ;;   (fullscreen-restore . maximized)
                              )
@@ -2208,3 +2211,5 @@ PREFIX forces the use of `find'."
                      (time-subtract (current-time) emacs-start-time))))
                (message "Loading %s...done (%.3fs) [after-init]"
                         ,load-file-name elapsed))) t)
+
+(provide 'config)

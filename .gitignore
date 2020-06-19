@@ -2,3 +2,5 @@
 config.org
 amx-items
 *.elc
+*~
+transient/*
